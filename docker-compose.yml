@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  tello_sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tello_humble_env
+    # Red en modo host para evitar problemas de descubrimiento de nodos ROS 2
+    network_mode: host
+    # Mantener el contenedor en ejecución de forma interactiva
+    stdin_open: true
+    tty: true
+    privileged: true
+    environment:
+      # Pasar la variable de entorno de la pantalla para las GUIs (Gazebo/RViz)
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      # Mapear la carpeta src local al workspace del contenedor
+      - ./src:/ros2_ws/src
+      # Compartir el socket de X11 para renderizado gráfico
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
