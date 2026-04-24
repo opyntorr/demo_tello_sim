@@ -1,0 +1,12 @@
+# ROS 2 build files
+build/
+install/
+log/
+
+# Tello reports and plots
+src/tello_control_pos/tello_control_pos/*.png
+src/tello_control_pos/tello_control_pos/*.csv
+
+# Python cache
+__pycache__/
+*.pyc
