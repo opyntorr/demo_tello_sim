@@ -16,16 +16,20 @@ class TelloPlotter(Node):
         self.odom_sub = self.create_subscription(Odometry, '/drone1/integrated_odom', self.odom_callback, 10)
         self.target_sub = self.create_subscription(Point, '/drone1/target_position', self.target_callback, 10)
         
-        # Posición objetivo (Hardcoded para coincidir con el controlador)
-        self.target_x = 2.0
-        self.target_y = 2.0
-        self.target_z = 1.5
+        # Posición objetivo inicial
+        self.target_x = 0.0
+        self.target_y = 0.0
+        self.target_z = 0.0
+        self.target_received = False
         
         # Historial de datos
         self.time_history = []
         self.x_history = []
         self.y_history = []
         self.z_history = []
+        self.tx_history = []
+        self.ty_history = []
+        self.tz_history = []
         self.start_time = None
         
         # Configuración de gráfica en tiempo real
@@ -41,8 +45,7 @@ class TelloPlotter(Node):
         self.ax3d.set_zlabel('Z [m]')
         self.ax3d.plot([0], [0], [0], 'go', label='Inicio')
         
-        target_plot_3d = self.ax3d.plot([self.target_x], [self.target_y], [self.target_z], 'rx', label='Meta')
-        self.target_point3d = target_plot_3d[0]
+        self.target_line3d, = self.ax3d.plot([], [], [], 'r--', label='Meta')
         
         self.line3d, = self.ax3d.plot([], [], [], 'b-', label='Trayecto')
         
@@ -55,19 +58,19 @@ class TelloPlotter(Node):
         # Subplots X, Y, Z
         self.ax_x = self.fig.add_subplot(gs[0, 1])
         self.line_x, = self.ax_x.plot([], [], 'b-')
-        self.target_line_x = self.ax_x.axhline(y=self.target_x, color='r', linestyle='--', label='Meta X')
+        self.target_line_x, = self.ax_x.plot([], [], 'r--', label='Meta X')
         self.ax_x.set_ylabel('X [m]')
         self.ax_x.grid(True)
         
         self.ax_y = self.fig.add_subplot(gs[1, 1])
         self.line_y, = self.ax_y.plot([], [], 'g-')
-        self.target_line_y = self.ax_y.axhline(y=self.target_y, color='r', linestyle='--', label='Meta Y')
+        self.target_line_y, = self.ax_y.plot([], [], 'r--', label='Meta Y')
         self.ax_y.set_ylabel('Y [m]')
         self.ax_y.grid(True)
         
         self.ax_z = self.fig.add_subplot(gs[2, 1])
         self.line_z, = self.ax_z.plot([], [], 'm-')
-        self.target_line_z = self.ax_z.axhline(y=self.target_z, color='r', linestyle='--', label='Meta Z')
+        self.target_line_z, = self.ax_z.plot([], [], 'r--', label='Meta Z')
         self.ax_z.set_ylabel('Z [m]')
         self.ax_z.set_xlabel('Tiempo [s]')
         self.ax_z.grid(True)
@@ -88,25 +91,25 @@ class TelloPlotter(Node):
         t = (current_time - self.start_time).nanoseconds / 1e9
         pose = msg.pose.pose.position
         
+        if not self.target_received:
+            self.target_x = pose.x
+            self.target_y = pose.y
+            self.target_z = pose.z
+            
         self.time_history.append(t)
         self.x_history.append(pose.x)
         self.y_history.append(pose.y)
         self.z_history.append(pose.z)
+        self.tx_history.append(self.target_x)
+        self.ty_history.append(self.target_y)
+        self.tz_history.append(self.target_z)
         self.messages_received += 1
 
     def target_callback(self, msg):
         self.target_x = msg.x
         self.target_y = msg.y
         self.target_z = msg.z
-        
-        # Actualizar la cruz en la gráfica 3D
-        self.target_point3d.set_data([self.target_x], [self.target_y])
-        self.target_point3d.set_3d_properties([self.target_z])
-        
-        # Actualizar las líneas horizontales
-        self.target_line_x.set_ydata([self.target_x, self.target_x])
-        self.target_line_y.set_ydata([self.target_y, self.target_y])
-        self.target_line_z.set_ydata([self.target_z, self.target_z])
+        self.target_received = True
         
         # Ajustar límites 3D si la meta está fuera de la vista
         curr_xlim = self.ax3d.get_xlim()
@@ -126,9 +129,16 @@ class TelloPlotter(Node):
                 self.line3d.set_data(self.x_history, self.y_history)
                 self.line3d.set_3d_properties(self.z_history)
                 
+                self.target_line3d.set_data(self.tx_history, self.ty_history)
+                self.target_line3d.set_3d_properties(self.tz_history)
+                
                 self.line_x.set_data(self.time_history, self.x_history)
                 self.line_y.set_data(self.time_history, self.y_history)
                 self.line_z.set_data(self.time_history, self.z_history)
+                
+                self.target_line_x.set_data(self.time_history, self.tx_history)
+                self.target_line_y.set_data(self.time_history, self.ty_history)
+                self.target_line_z.set_data(self.time_history, self.tz_history)
                 
                 max_t = max(5.0, self.time_history[-1])
                 self.ax_x.set_xlim([0, max_t])
@@ -156,26 +166,26 @@ class TelloPlotter(Node):
         csv_file = os.path.join(dir_path, "ultimo_reporte_tello.csv")
         with open(csv_file, mode='w') as f:
             writer = csv.writer(f)
-            writer.writerow(["Time", "X", "Y", "Z"])
-            for row in zip(self.time_history, self.x_history, self.y_history, self.z_history): 
+            writer.writerow(["Time", "X", "Y", "Z", "Target_X", "Target_Y", "Target_Z"])
+            for row in zip(self.time_history, self.x_history, self.y_history, self.z_history, self.tx_history, self.ty_history, self.tz_history): 
                 writer.writerow(row)
 
         # 2. Guardar PNG de Posiciones X, Y, Z vs Tiempo
         plt.figure(figsize=(10, 8))
         plt.subplot(3, 1, 1)
         plt.plot(self.time_history, self.x_history, 'b-', label='X')
-        plt.axhline(y=self.target_x, color='r', linestyle='--', label='Meta X')
+        plt.plot(self.time_history, self.tx_history, 'r--', label='Meta X')
         plt.title('Posición en el tiempo')
         plt.ylabel('X [m]'); plt.grid(True); plt.legend()
         
         plt.subplot(3, 1, 2)
         plt.plot(self.time_history, self.y_history, 'g-', label='Y')
-        plt.axhline(y=self.target_y, color='r', linestyle='--', label='Meta Y')
+        plt.plot(self.time_history, self.ty_history, 'r--', label='Meta Y')
         plt.ylabel('Y [m]'); plt.grid(True); plt.legend()
         
         plt.subplot(3, 1, 3)
         plt.plot(self.time_history, self.z_history, 'm-', label='Z')
-        plt.axhline(y=self.target_z, color='r', linestyle='--', label='Meta Z')
+        plt.plot(self.time_history, self.tz_history, 'r--', label='Meta Z')
         plt.xlabel('Tiempo [s]'); plt.ylabel('Z [m]'); plt.grid(True); plt.legend()
         
         plt.tight_layout()
@@ -186,7 +196,7 @@ class TelloPlotter(Node):
         fig = plt.figure(figsize=(10, 8))
         ax = fig.add_subplot(111, projection='3d')
         ax.plot([0], [0], [0], 'go', label='Inicio')
-        ax.plot([self.target_x], [self.target_y], [self.target_z], 'rx', label='Meta')
+        ax.plot(self.tx_history, self.ty_history, self.tz_history, 'r--', label='Meta')
         ax.plot(self.x_history, self.y_history, self.z_history, 'b-', label='Trayecto 3D')
         ax.set_title('Trayectoria 3D - Tello')
         ax.set_xlabel('X [m]')

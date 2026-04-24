@@ -14,10 +14,11 @@ class TelloPositionController(Node):
         self.odom_sub = self.create_subscription(Odometry, '/drone1/integrated_odom', self.odom_callback, 10)
         self.target_sub = self.create_subscription(Point, '/drone1/target_position', self.target_callback, 10)
         
-        # Posición objetivo (Setpoint) en metros
-        self.target_x = 2.0
-        self.target_y = 2.0
-        self.target_z = 1.5
+        # Posición objetivo inicializada en None (esperando comando)
+        self.target_x = None
+        self.target_y = None
+        self.target_z = None
+        self.target_received = False
         
         # Ganancias del controlador PID (Perfil muy lento)
         self.kp = 0.15  # Empuje inicial muy suave
@@ -47,14 +48,16 @@ class TelloPositionController(Node):
     def odom_callback(self, msg):
         self.current_pose = msg.pose.pose.position
         
+        
     def target_callback(self, msg):
         self.target_x = msg.x
         self.target_y = msg.y
         self.target_z = msg.z
+        self.target_received = True
         self.get_logger().info(f"🎯 Nuevo objetivo recibido: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
         
     def control_loop(self):
-        if self.current_pose is None:
+        if self.current_pose is None or not self.target_received:
             return
             
         current_time = self.get_clock().now()
