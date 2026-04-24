@@ -24,6 +24,9 @@ RUN apt-get update && apt-get install -y \
     tmux \
     && rm -rf /var/lib/apt/lists/*
 
+# Instalar dependencias del Tello driver
+RUN pip3 install catkin_pkg rospkg av image djitellopy2 pyyaml
+
 # Configurar variables de entorno para NVIDIA
 ENV NVIDIA_VISIBLE_DEVICES \
     ${NVIDIA_VISIBLE_DEVICES:-all}
