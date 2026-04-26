@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar dependencias del Tello driver
-RUN pip3 install "numpy==1.23.5" catkin_pkg rospkg av image djitellopy2 pyyaml
+RUN pip3 install "numpy==1.23.5" transformations catkin_pkg rospkg av image djitellopy2 pyyaml
 
 # Configurar variables de entorno para NVIDIA
 ENV NVIDIA_VISIBLE_DEVICES \

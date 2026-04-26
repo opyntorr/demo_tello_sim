@@ -10,7 +10,11 @@ def generate_launch_description():
             package='tello_control_pos',
             executable='odometry_integrator',
             name='odometry_integrator',
-            output='screen'
+            output='screen',
+            parameters=[
+                {'use_sim_time': True},
+                {'vel_multiplier': 1.0}
+            ]
         ),
         
         # 2. Ejecutar plotter
@@ -18,7 +22,8 @@ def generate_launch_description():
             package='tello_control_pos',
             executable='plotter',
             name='plotter',
-            output='screen'
+            output='screen',
+            parameters=[{'use_sim_time': True}]
         ),
         
         # 3. Ejecutar position_controller
@@ -26,7 +31,11 @@ def generate_launch_description():
             package='tello_control_pos',
             executable='position_controller',
             name='position_controller',
-            output='screen'
+            output='screen',
+            parameters=[
+                {'use_sim_time': True},
+                {'velocity_scale': 1.0}
+            ]
         ),
         
         # 4. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista

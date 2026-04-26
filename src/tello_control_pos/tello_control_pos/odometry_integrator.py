@@ -43,14 +43,15 @@ class SimpleIntegratorOdom(Node):
         # Bucle de integración a alta frecuencia (50 Hz)
         self.timer = self.create_timer(0.02, self.integration_loop)
         
+        # Multiplicador para corregir la escala de velocidad del sensor
+        self.declare_parameter('vel_multiplier', 10.0)
+        self.multiplier = self.get_parameter('vel_multiplier').get_parameter_value().double_value
+        
     def velocity_sensor_callback(self, msg):
-        # Leemos el SENSOR de velocidad. (Twist viene en el Body Frame)
-        # NOTA: El driver del dron real divide por 100.0 (en vez de 10.0) 
-        # las velocidades en dm/s, haciéndolas 10 veces más pequeñas. 
-        # Multiplicamos por 10.0 aquí para corregirlo sin tocar el driver.
-        self.v_x = msg.twist.twist.linear.x * 10.0
-        self.v_y = msg.twist.twist.linear.y * 10.0
-        self.v_z = msg.twist.twist.linear.z * 10.0
+        # Usamos el multiplicador configurado (10.0 para real, 1.0 para simulación)
+        self.v_x = msg.twist.twist.linear.x * self.multiplier
+        self.v_y = msg.twist.twist.linear.y * self.multiplier
+        self.v_z = msg.twist.twist.linear.z * self.multiplier
         self.w_z = msg.twist.twist.angular.z
         
         # Leemos la altura absoluta (TOF) si está disponible
