@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: tello_humble_env
+    container_name: tello_sim_x10
     # Red en modo host para evitar problemas de descubrimiento de nodos ROS 2
     network_mode: host
     # Mantener el contenedor en ejecución de forma interactiva

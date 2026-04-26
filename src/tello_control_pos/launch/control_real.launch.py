@@ -43,6 +43,9 @@ def generate_launch_description():
             output='screen',
             remappings=[
                 ('/drone1/cmd_vel', '/control')  # Remapeo al tópico del dron real
+            ],
+            parameters=[
+                {'velocity_scale': 100.0}
             ]
         ),
         

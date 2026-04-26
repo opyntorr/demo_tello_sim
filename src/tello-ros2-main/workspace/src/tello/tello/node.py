@@ -158,6 +158,10 @@ class TelloNode():
                     odom_msg.pose.pose.orientation.y = q[1]
                     odom_msg.pose.pose.orientation.z = q[2]
                     odom_msg.pose.pose.orientation.w = q[3]
+                    
+                    # Añadimos la altura absoluta del sensor TOF
+                    odom_msg.pose.pose.position.z = float(self.tello.get_distance_tof()) / 100.0
+                    
                     odom_msg.twist.twist.linear.x = float(self.tello.get_speed_x()) / 100.0
                     odom_msg.twist.twist.linear.y = float(self.tello.get_speed_y()) / 100.0
                     odom_msg.twist.twist.linear.z = float(self.tello.get_speed_z()) / 100.0

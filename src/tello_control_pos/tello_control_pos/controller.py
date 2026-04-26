@@ -20,14 +20,18 @@ class TelloPositionController(Node):
         self.target_z = None
         self.target_received = False
         
-        # Ganancias del controlador PID (Perfil muy lento)
-        self.kp = 0.15  # Empuje inicial muy suave
-        self.ki = 0.01  # Corrección a largo plazo mínima
-        self.kd = 0.35  # Freno aerodinámico fuerte para evitar oscilaciones
+        # Ganancias del controlador PID
+        self.kp = 0.8   # Aumentado para superar la inercia del dron real
+        self.ki = 0.02  # Corrección a largo plazo
+        self.kd = 0.35  # Freno aerodinámico
         
         # Límites de saturación
-        self.max_vel = 0.15          # Velocidad máxima estricta (15 cm/s)
-        self.max_integral = 0.5      # Límite bajo de acumulación
+        self.max_vel = 0.5          # Velocidad máxima estricta (50 cm/s)
+        self.max_integral = 1.0     # Límite de acumulación
+        
+        # Escala de velocidad (1.0 para Gazebo, 100.0 para Tello real)
+        self.declare_parameter('velocity_scale', 1.0)
+        self.vel_scale = self.get_parameter('velocity_scale').get_parameter_value().double_value
         
         # Memoria de estado para derivadas e integrales
         self.prev_error_x = 0.0
@@ -58,6 +62,12 @@ class TelloPositionController(Node):
         
     def control_loop(self):
         if self.current_pose is None or not self.target_received:
+            return
+            
+        # Seguridad: Esperar a que el dron termine el despegue físico (Z > 40 cm)
+        # Esto evita enviar comandos agresivos si el objetivo se manda muy pronto.
+        if self.current_pose.z < 0.4:
+            self.get_logger().info("Esperando a que termine el despegue (Z < 0.4m)...", throttle_duration_sec=2.0)
             return
             
         current_time = self.get_clock().now()
@@ -126,6 +136,11 @@ class TelloPositionController(Node):
         self.prev_error_z = error_z
         self.last_time = current_time
             
+        # Escalar velocidades para el driver si es necesario
+        twist.linear.x *= self.vel_scale
+        twist.linear.y *= self.vel_scale
+        twist.linear.z *= self.vel_scale
+
         # Publicar el comando de velocidad
         self.cmd_vel_pub.publish(twist)
 

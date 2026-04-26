@@ -45,10 +45,19 @@ class SimpleIntegratorOdom(Node):
         
     def velocity_sensor_callback(self, msg):
         # Leemos el SENSOR de velocidad. (Twist viene en el Body Frame)
-        self.v_x = msg.twist.twist.linear.x
-        self.v_y = msg.twist.twist.linear.y
-        self.v_z = msg.twist.twist.linear.z
+        # NOTA: El driver del dron real divide por 100.0 (en vez de 10.0) 
+        # las velocidades en dm/s, haciéndolas 10 veces más pequeñas. 
+        # Multiplicamos por 10.0 aquí para corregirlo sin tocar el driver.
+        self.v_x = msg.twist.twist.linear.x * 10.0
+        self.v_y = msg.twist.twist.linear.y * 10.0
+        self.v_z = msg.twist.twist.linear.z * 10.0
         self.w_z = msg.twist.twist.angular.z
+        
+        # Leemos la altura absoluta (TOF) si está disponible
+        incoming_z = msg.pose.pose.position.z
+        # Filtrar picos de error del sensor (ej. 65 metros cuando pierde señal)
+        if 0.01 < incoming_z < 5.0:
+            self.z = incoming_z
 
     def integration_loop(self):
         current_time = self.get_clock().now()
@@ -70,7 +79,9 @@ class SimpleIntegratorOdom(Node):
         # Integración Numérica (x = x + v * dt)
         self.x += world_v_x * dt
         self.y += world_v_y * dt
-        self.z += self.v_z * dt
+        
+        # NOTA: La Z ya no la integramos porque ahora usamos el sensor TOF absoluto 
+        # que seteamos en el callback. (Si z = 0, se queda en 0 hasta que suba).
         
         # 2. Publicar la Odometría
         odom_msg = Odometry()
