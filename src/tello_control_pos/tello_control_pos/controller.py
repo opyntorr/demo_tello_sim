@@ -58,7 +58,7 @@ class TelloPositionController(Node):
         self.target_y = msg.y
         self.target_z = msg.z
         self.target_received = True
-        self.get_logger().info(f"🎯 Nuevo objetivo recibido: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
+        self.get_logger().info(f"Nuevo objetivo recibido: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
         
     def control_loop(self):
         if self.current_pose is None or not self.target_received:
@@ -128,7 +128,7 @@ class TelloPositionController(Node):
             self.integral_x = 0.0
             self.integral_y = 0.0
             self.integral_z = 0.0
-            self.get_logger().info("¡Posición objetivo alcanzada de forma estable!", throttle_duration_sec=2.0)
+            self.get_logger().info("Posición objetivo alcanzada de forma estable", throttle_duration_sec=2.0)
             
         # Guardar estado para la siguiente iteración
         self.prev_error_x = error_x
@@ -150,7 +150,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("🛑 Deteniendo controlador...")
+        node.get_logger().info("Deteniendo controlador...")
     finally:
         stop_msg = Twist()
         node.cmd_vel_pub.publish(stop_msg)

@@ -206,7 +206,7 @@ class TelloPlotter(Node):
         plt.savefig(os.path.join(dir_path, "ultima_trayectoria_3d_tello.png"))
         plt.close()
         
-        self.get_logger().info(f"✅ Reportes de gráficas actualizados en: {dir_path}")
+        self.get_logger().info(f"Reportes de gráficas actualizados en: {dir_path}")
 
 def main(args=None):
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
@@ -214,7 +214,7 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("🛑 Deteniendo graficador y generando archivos finales...")
+        node.get_logger().info("Deteniendo graficador y generando archivos finales...")
         node.exportar_datos()
     finally:
         node.destroy_node()
