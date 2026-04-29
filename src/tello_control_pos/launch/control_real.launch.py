@@ -23,7 +23,8 @@ def generate_launch_description():
             name='odometry_integrator',
             output='screen',
             remappings=[
-                ('/drone1/odom', '/odom')  # Remapeo al tópico del dron real
+                ('/drone1/odom', '/odom'),
+                ('/drone1/imu', '/imu')
             ]
         ),
         
