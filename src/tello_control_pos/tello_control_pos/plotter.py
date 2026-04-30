@@ -98,8 +98,10 @@ class TelloPlotter(Node):
         self.ax_stats = self.fig.add_subplot(gs[2, 2])
         self.ax_stats.axis('off')
         self.ax_stats.set_title('Estadísticas de Ruido', fontsize=9)
-        self.stats_text = self.ax_stats.text(0.05, 0.95, 'Esperando datos...', 
-            transform=self.ax_stats.transAxes, fontsize=8, verticalalignment='top', family='monospace')
+        self.stats_text = self.ax_stats.text(
+            0.05, 0.95, 'Esperando datos...',
+            transform=self.ax_stats.transAxes, fontsize=8,
+            verticalalignment='top', family='monospace')
         
         plt.show()
 
@@ -200,9 +202,10 @@ class TelloPlotter(Node):
                 self.ax_z.set_xlim([0, max_t])
                 
                 # Auto-ajuste de ejes Y con margen
-                for ax, data, target in [(self.ax_x, self.x_history, self.target_x), 
-                                       (self.ax_y, self.y_history, self.target_y), 
-                                       (self.ax_z, self.z_history, self.target_z)]:
+                for ax, data, target in [
+                        (self.ax_x, self.x_history, self.target_x),
+                        (self.ax_y, self.y_history, self.target_y),
+                        (self.ax_z, self.z_history, self.target_z)]:
                     min_val, max_val = min(data + [0, target]), max(data + [0, target])
                     ax.set_ylim([min_val - 0.5, max_val + 0.5])
                 
@@ -273,6 +276,7 @@ def main(args=None):
     node = TelloPlotter()
     
     exported = [False]
+
     def shutdown_handler(sig, frame):
         if not exported[0]:
             exported[0] = True
