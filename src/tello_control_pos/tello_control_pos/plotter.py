@@ -59,9 +59,9 @@ class TelloPlotter(Node):
         self.ax3d.plot([0], [0], [0], 'go', label='Inicio')
         self.target_line3d, = self.ax3d.plot([], [], [], 'r--', label='Meta')
         self.line3d, = self.ax3d.plot([], [], [], 'b-', label='Trayecto')
-        self.ax3d.set_xlim([-0.5, max(3.0, self.target_x + 1)])
-        self.ax3d.set_ylim([-0.5, max(3.0, self.target_y + 1)])
-        self.ax3d.set_zlim([0, max(2.0, self.target_z + 1)])
+        self.ax3d.set_xlim([-0.5, 3.0])
+        self.ax3d.set_ylim([-0.5, 3.0])
+        self.ax3d.set_zlim([0, 2.0])
         self.ax3d.legend(fontsize=7)
         
         # Columna 1: Posición X, Y, Z vs Tiempo
@@ -106,11 +106,10 @@ class TelloPlotter(Node):
         # Timer para actualizar la gráfica (10 Hz)
         self.timer = self.create_timer(0.1, self.update_plot)
         self.messages_received = 0
+        self.last_log_time = self.get_clock().now()
 
     def odom_callback(self, msg):
-        # Usar el timestamp del mensaje (cuando el integrador lo publicó),
-        # NO self.get_clock().now() (cuando el plotter lo procesó).
-        # Esto evita que matplotlib distorsione los timestamps al bloquear el executor.
+        # Usar el timestamp del mensaje (nuestra mejora clave)
         msg_sec = msg.header.stamp.sec
         msg_nsec = msg.header.stamp.nanosec
         msg_time_ns = msg_sec * 1_000_000_000 + msg_nsec
@@ -126,7 +125,7 @@ class TelloPlotter(Node):
             self.target_y = pose.y
             self.target_z = pose.z
         
-        # Calcular jitter (diferencia entre muestras consecutivas)
+        # Calcular jitter
         if len(self.x_history) > 0:
             self.jitter_x.append(pose.x - self.x_history[-1])
             self.jitter_y.append(pose.y - self.y_history[-1])
@@ -154,13 +153,19 @@ class TelloPlotter(Node):
         
         self.messages_received += 1
 
+        # Log periódico
+        now = self.get_clock().now()
+        if (now - self.last_log_time).nanoseconds / 1e9 > 5.0:
+            self.get_logger().info(f"Datos recibidos: {self.messages_received} msgs, Z={pose.z:.2f}")
+            self.last_log_time = now
+
     def target_callback(self, msg):
         self.target_x = msg.x
         self.target_y = msg.y
         self.target_z = msg.z
         self.target_received = True
         
-        # Ajustar límites 3D si la meta está fuera de la vista
+        # Ajustar límites 3D
         curr_xlim = self.ax3d.get_xlim()
         curr_ylim = self.ax3d.get_ylim()
         curr_zlim = self.ax3d.get_zlim()
@@ -172,7 +177,7 @@ class TelloPlotter(Node):
         if not self.time_history:
             return
             
-        # Actualizar gráfica en tiempo real (cada 2 mensajes recibidos para no saturar)
+        # Actualizar gráfica cada 2 mensajes para no saturar
         if self.messages_received % 2 == 0:
             try:
                 self.line3d.set_data(self.x_history, self.y_history)
@@ -194,183 +199,85 @@ class TelloPlotter(Node):
                 self.ax_y.set_xlim([0, max_t])
                 self.ax_z.set_xlim([0, max_t])
                 
-                min_x, max_x = min(self.x_history + [0, self.target_x]), max(self.x_history + [0, self.target_x])
-                self.ax_x.set_ylim([min_x - 0.5, max_x + 0.5])
+                # Auto-ajuste de ejes Y con margen
+                for ax, data, target in [(self.ax_x, self.x_history, self.target_x), 
+                                       (self.ax_y, self.y_history, self.target_y), 
+                                       (self.ax_z, self.z_history, self.target_z)]:
+                    min_val, max_val = min(data + [0, target]), max(data + [0, target])
+                    ax.set_ylim([min_val - 0.5, max_val + 0.5])
                 
-                min_y, max_y = min(self.y_history + [0, self.target_y]), max(self.y_history + [0, self.target_y])
-                self.ax_y.set_ylim([min_y - 0.5, max_y + 0.5])
-                
-                min_z, max_z = min(self.z_history + [0, self.target_z]), max(self.z_history + [0, self.target_z])
-                self.ax_z.set_ylim([min_z - 0.5, max_z + 0.5])
-                
-                # ── Actualizar gráficas de ruido ──
+                # Actualizar gráficas de ruido
                 if len(self.jitter_time) > 1:
                     self.jline_x.set_data(self.jitter_time, self.jitter_x)
                     self.jline_y.set_data(self.jitter_time, self.jitter_y)
                     self.jline_z.set_data(self.jitter_time, self.jitter_z)
                     self.ax_jitter.set_xlim([0, max_t])
                     all_j = self.jitter_x + self.jitter_y + self.jitter_z
-                    jmin, jmax = min(all_j), max(all_j)
-                    margin = max(0.01, (jmax - jmin) * 0.2)
-                    self.ax_jitter.set_ylim([jmin - margin, jmax + margin])
+                    self.ax_jitter.set_ylim([min(all_j) - 0.05, max(all_j) + 0.05])
                 
                 if len(self.var_time) > 1:
                     self.vline_x.set_data(self.var_time, self.var_x)
                     self.vline_y.set_data(self.var_time, self.var_y)
                     self.vline_z.set_data(self.var_time, self.var_z)
                     self.ax_var.set_xlim([0, max_t])
-                    all_v = self.var_x + self.var_y + self.var_z
-                    vmax = max(all_v) if all_v else 0.01
-                    self.ax_var.set_ylim([0, vmax * 1.3])
+                    vmax = max(self.var_x + self.var_y + self.var_z)
+                    self.ax_var.set_ylim([0, vmax * 1.3 + 0.01])
                 
-                # Actualizar estadísticas cada 10 muestras
+                # Actualizar estadísticas en pantalla
                 if len(self.jitter_x) > 10 and self.messages_received % 10 == 0:
-                    jx_std = np.std(self.jitter_x)
-                    jy_std = np.std(self.jitter_y)
-                    jz_std = np.std(self.jitter_z)
-                    x_range = max(self.x_history) - min(self.x_history) if self.x_history else 1.0
-                    y_range = max(self.y_history) - min(self.y_history) if self.y_history else 1.0
-                    z_range = max(self.z_history) - min(self.z_history) if self.z_history else 1.0
-                    snr_x = x_range / jx_std if jx_std > 1e-9 else float('inf')
-                    snr_y = y_range / jy_std if jy_std > 1e-9 else float('inf')
-                    snr_z = z_range / jz_std if jz_std > 1e-9 else float('inf')
-                    
                     stats = (
-                        f"Std Jitter:\n"
-                        f"  X: {jx_std*100:.3f} cm\n"
-                        f"  Y: {jy_std*100:.3f} cm\n"
-                        f"  Z: {jz_std*100:.3f} cm\n\n"
-                        f"SNR (rango/σ):\n"
-                        f"  X: {snr_x:.1f}\n"
-                        f"  Y: {snr_y:.1f}\n"
-                        f"  Z: {snr_z:.1f}\n\n"
+                        f"Std Jitter (cm):\n"
+                        f"  X: {np.std(self.jitter_x)*100:.2f}\n"
+                        f"  Y: {np.std(self.jitter_y)*100:.2f}\n"
+                        f"  Z: {np.std(self.jitter_z)*100:.2f}\n\n"
                         f"Muestras: {len(self.x_history)}"
                     )
                     self.stats_text.set_text(stats)
                 
                 self.fig.canvas.draw()
                 self.fig.canvas.flush_events()
-            except Exception as e:
+            except Exception:
                 pass
 
     def exportar_datos(self):
         dir_path = "/ros2_ws/src/tello_control_pos/tello_control_pos/"
+        os.makedirs(dir_path, exist_ok=True)
         
-        # 1. Guardar CSV fijo
-        csv_file = os.path.join(dir_path, "ultimo_reporte_tello.csv")
-        with open(csv_file, mode='w') as f:
+        # 1. Guardar CSV de trayectorias
+        with open(os.path.join(dir_path, "ultimo_reporte_tello.csv"), mode='w') as f:
             writer = csv.writer(f)
             writer.writerow(["Time", "X", "Y", "Z", "Target_X", "Target_Y", "Target_Z"])
             for row in zip(self.time_history, self.x_history, self.y_history, self.z_history, self.tx_history, self.ty_history, self.tz_history): 
                 writer.writerow(row)
 
-        # 2. Guardar PNG de Posiciones X, Y, Z vs Tiempo
-        plt.figure(figsize=(10, 8))
-        plt.subplot(3, 1, 1)
-        plt.plot(self.time_history, self.x_history, 'b-', label='X')
-        plt.plot(self.time_history, self.tx_history, 'r--', label='Meta X')
-        plt.title('Posición en el tiempo')
-        plt.ylabel('X [m]'); plt.grid(True); plt.legend()
-        
-        plt.subplot(3, 1, 2)
-        plt.plot(self.time_history, self.y_history, 'g-', label='Y')
-        plt.plot(self.time_history, self.ty_history, 'r--', label='Meta Y')
-        plt.ylabel('Y [m]'); plt.grid(True); plt.legend()
-        
-        plt.subplot(3, 1, 3)
-        plt.plot(self.time_history, self.z_history, 'm-', label='Z')
-        plt.plot(self.time_history, self.tz_history, 'r--', label='Meta Z')
-        plt.xlabel('Tiempo [s]'); plt.ylabel('Z [m]'); plt.grid(True); plt.legend()
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(dir_path, "ultima_grafica_xyz_tello.png"))
-        plt.close()
-
-        # 3. Guardar PNG de Trayectoria 3D
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        ax.plot([0], [0], [0], 'go', label='Inicio')
-        ax.plot(self.tx_history, self.ty_history, self.tz_history, 'r--', label='Meta')
-        ax.plot(self.x_history, self.y_history, self.z_history, 'b-', label='Trayecto 3D')
-        ax.set_title('Trayectoria 3D - Tello')
-        ax.set_xlabel('X [m]'); ax.set_ylabel('Y [m]'); ax.set_zlabel('Z [m]')
-        ax.legend()
-        plt.savefig(os.path.join(dir_path, "ultima_trayectoria_3d_tello.png"))
-        plt.close()
-
-        # 4. Guardar PNG de Análisis de Ruido
-        if len(self.jitter_x) > 2:
-            fig, axes = plt.subplots(3, 1, figsize=(12, 10))
-            
-            # Jitter por eje
-            axes[0].plot(self.jitter_time, self.jitter_x, 'b-', alpha=0.6, linewidth=0.8, label='ΔX')
-            axes[0].plot(self.jitter_time, self.jitter_y, 'g-', alpha=0.6, linewidth=0.8, label='ΔY')
-            axes[0].plot(self.jitter_time, self.jitter_z, 'm-', alpha=0.6, linewidth=0.8, label='ΔZ')
-            axes[0].set_title('Jitter de Odometría (cambio entre muestras)')
-            axes[0].set_ylabel('Δ posición [m]'); axes[0].grid(True); axes[0].legend()
-            axes[0].axhline(y=0, color='k', linestyle='-', linewidth=0.5)
-            
-            # Varianza en ventana deslizante
-            if len(self.var_time) > 1:
-                axes[1].plot(self.var_time, self.var_x, 'b-', label='σ² X')
-                axes[1].plot(self.var_time, self.var_y, 'g-', label='σ² Y')
-                axes[1].plot(self.var_time, self.var_z, 'm-', label='σ² Z')
-            axes[1].set_title(f'Varianza en Ventana Deslizante ({self.WINDOW_SIZE} muestras)')
-            axes[1].set_ylabel('Varianza [m²]'); axes[1].set_xlabel('Tiempo [s]')
-            axes[1].grid(True); axes[1].legend()
-            
-            # Histograma de jitter
-            axes[2].hist(self.jitter_x, bins=50, alpha=0.5, color='b', label=f'X (σ={np.std(self.jitter_x)*100:.2f}cm)')
-            axes[2].hist(self.jitter_y, bins=50, alpha=0.5, color='g', label=f'Y (σ={np.std(self.jitter_y)*100:.2f}cm)')
-            axes[2].hist(self.jitter_z, bins=50, alpha=0.5, color='m', label=f'Z (σ={np.std(self.jitter_z)*100:.2f}cm)')
-            axes[2].set_title('Distribución del Jitter')
-            axes[2].set_xlabel('Δ posición [m]'); axes[2].set_ylabel('Frecuencia')
-            axes[2].grid(True); axes[2].legend()
-            
-            plt.tight_layout()
-            plt.savefig(os.path.join(dir_path, "analisis_ruido_odom.png"), dpi=150)
-            plt.close()
-        
-        # 5. Guardar CSV de ruido
-        if len(self.jitter_x) > 0:
-            csv_noise = os.path.join(dir_path, "ruido_odometria.csv")
-            with open(csv_noise, mode='w') as f:
+        # 2. Guardar CSV de ruido
+        if self.jitter_time:
+            with open(os.path.join(dir_path, "ruido_odometria.csv"), mode='w') as f:
                 writer = csv.writer(f)
                 writer.writerow(["Time", "Jitter_X", "Jitter_Y", "Jitter_Z"])
                 for row in zip(self.jitter_time, self.jitter_x, self.jitter_y, self.jitter_z):
                     writer.writerow(row)
-            
-            self.get_logger().info(
-                f"\n{'='*50}\n"
-                f"  REPORTE DE RUIDO DE ODOMETRÍA\n"
-                f"{'='*50}\n"
-                f"  Std Jitter X: {np.std(self.jitter_x)*100:.3f} cm\n"
-                f"  Std Jitter Y: {np.std(self.jitter_y)*100:.3f} cm\n"
-                f"  Std Jitter Z: {np.std(self.jitter_z)*100:.3f} cm\n"
-                f"  Max Jitter X: {max(abs(j) for j in self.jitter_x)*100:.3f} cm\n"
-                f"  Max Jitter Y: {max(abs(j) for j in self.jitter_y)*100:.3f} cm\n"
-                f"  Max Jitter Z: {max(abs(j) for j in self.jitter_z)*100:.3f} cm\n"
-                f"{'='*50}"
-            )
         
-        self.get_logger().info(f"Reportes de gráficas actualizados en: {dir_path}")
+        # 3. Guardar gráficas (PNG)
+        plt.figure(figsize=(12, 10))
+        plt.subplot(3, 1, 1); plt.plot(self.time_history, self.x_history); plt.grid(True); plt.title("X vs T")
+        plt.subplot(3, 1, 2); plt.plot(self.time_history, self.y_history); plt.grid(True); plt.title("Y vs T")
+        plt.subplot(3, 1, 3); plt.plot(self.time_history, self.z_history); plt.grid(True); plt.title("Z vs T")
+        plt.savefig(os.path.join(dir_path, "ultima_grafica_xyz_tello.png"))
+        plt.close()
+
+        self.get_logger().info(f"Reportes guardados en: {dir_path}")
 
 def main(args=None):
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = TelloPlotter()
     
-    # Flag para garantizar que la exportación se ejecute exactamente una vez
-    exported = False
-    
+    exported = [False]
     def shutdown_handler(sig, frame):
-        nonlocal exported
-        if not exported:
-            exported = True
-            node.get_logger().info("Señal recibida. Generando archivos finales...")
-            try:
-                node.exportar_datos()
-            except Exception as e:
-                node.get_logger().error(f"Error al exportar: {e}")
+        if not exported[0]:
+            exported[0] = True
+            node.get_logger().info("Señal recibida. Exportando...")
+            node.exportar_datos()
         raise SystemExit(0)
     
     signal.signal(signal.SIGINT, shutdown_handler)
@@ -379,19 +286,12 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, SystemExit):
-        if not exported:
-            exported = True
-            node.get_logger().info("Deteniendo graficador y generando archivos finales...")
-            try:
-                node.exportar_datos()
-            except Exception as e:
-                node.get_logger().error(f"Error al exportar: {e}")
+        if not exported[0]:
+            exported[0] = True
+            node.exportar_datos()
     finally:
         node.destroy_node()
-        try:
-            rclpy.shutdown()
-        except Exception:
-            pass
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

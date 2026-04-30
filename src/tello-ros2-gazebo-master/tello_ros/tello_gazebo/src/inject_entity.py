@@ -5,6 +5,12 @@
 import sys
 
 import rclpy
+import numpy as np
+
+# Parche para compatibilidad con Numpy 1.24+
+if not hasattr(np, "float"):
+    np.float = float
+
 import transformations
 from gazebo_msgs.srv import SpawnEntity
 from geometry_msgs.msg import Pose

@@ -21,9 +21,9 @@ class TelloPositionController(Node):
         self.target_received = False
         
         # Ganancias del controlador PID
-        self.kp = 0.8   # Aumentado para superar la inercia del dron real
-        self.ki = 0.02  # Corrección a largo plazo
-        self.kd = 0.35  # Freno aerodinámico
+        self.kp = 0.3   # Aumentado para superar la inercia del dron real
+        self.ki = 0.01  # Corrección a largo plazo
+        self.kd = 0.5  # Freno aerodinámico
         
         # Límites de saturación
         self.max_vel = 0.5          # Velocidad máxima estricta (50 cm/s)

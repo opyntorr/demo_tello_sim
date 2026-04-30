@@ -1,138 +1,272 @@
 #!/usr/bin/env python3
+"""
+Nodo de Odometría con Filtro de Kalman Extendido (EKF).
+
+Fusiona tres fuentes de datos para estimar la posición del dron:
+  1. Velocidades del flujo óptico (body frame) → /drone1/odom
+  2. Altura absoluta del sensor TOF              → /drone1/odom (solo durante takeoff)
+  3. Orientación (yaw) del IMU                   → /drone1/imu
+
+Vector de estado (7 elementos):
+  x = [px, py, pz, vx, vy, vz, θ]ᵀ
+
+El TOF solo se utiliza para establecer la altura inicial durante el
+despegue. Una vez completado, la altura se estima únicamente por
+integración de velocidad (odometría).
+
+Publica la odometría filtrada en /drone1/integrated_odom,
+manteniendo la misma interfaz que el integrador simple anterior.
+"""
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu
+import numpy as np
 import math
+
+# Parche para compatibilidad con Numpy 1.24+
+if not hasattr(np, "float"):
+    np.float = float
+
 import tf_transformations
 
-class SimpleIntegratorOdom(Node):
+
+class EKFOdometryNode(Node):
     def __init__(self):
         super().__init__('simple_integrator_odom')
-        
-        # Suscriptor al SENSOR de velocidad del dron (En Gazebo viene dentro de Odom, 
-        # en el dron real vendría de /flight_data)
-        self.vel_sub = self.create_subscription(
-            Odometry, 
-            '/drone1/odom', 
-            self.velocity_sensor_callback, 
-            10
-        )
-        
-        # Publicador de la nueva odometría integrada
-        self.odom_pub = self.create_publisher(
-            Odometry, 
-            '/drone1/integrated_odom', 
-            10
-        )
-        
-        # Variables de estado (Posición actual)
-        self.x = 0.0
-        self.y = 0.0
-        self.z = 0.0
-        self.theta = 0.0
-        
-        # Velocidades sensadas actuales (en m/s reales)
-        self.v_x = 0.0
-        self.v_y = 0.0
-        self.v_z = 0.0
-        self.w_z = 0.0
-        
-        self.last_time = self.get_clock().now()
-        
-        # Bucle de integración a alta frecuencia (50 Hz)
-        self.timer = self.create_timer(0.02, self.integration_loop)
-        
-        # Multiplicador para corregir la escala de velocidad del sensor
-        self.declare_parameter('vel_multiplier', 10.0)
-        self.multiplier = self.get_parameter('vel_multiplier').get_parameter_value().double_value
-        
-    def velocity_sensor_callback(self, msg):
-        # Usamos el multiplicador configurado (10.0 para real, 1.0 para simulación)
-        raw_v_x = msg.twist.twist.linear.x * self.multiplier
-        raw_v_y = msg.twist.twist.linear.y * self.multiplier
-        raw_v_z = msg.twist.twist.linear.z * self.multiplier
-        raw_w_z = msg.twist.twist.angular.z
-        
-        # Filtro pasa-bajas (EMA) para suavizar la velocidad a 10Hz
-        alpha_v = 0.5
-        self.v_x = (alpha_v * raw_v_x) + ((1.0 - alpha_v) * self.v_x)
-        self.v_y = (alpha_v * raw_v_y) + ((1.0 - alpha_v) * self.v_y)
-        self.v_z = (alpha_v * raw_v_z) + ((1.0 - alpha_v) * self.v_z)
-        self.w_z = (alpha_v * raw_w_z) + ((1.0 - alpha_v) * self.w_z)
-        
-        # Leemos la altura absoluta (TOF) si está disponible
-        incoming_z = msg.pose.pose.position.z
-        
-        # Filtro de rango válido para el TOF
-        if 0.01 < incoming_z < 5.0:
-            if self.z == 0.0:
-                self.z = incoming_z
-            else:
-                # Suavizado EMA para la Z (suaviza los picos de ruido sin bloquearse)
-                alpha_z = 0.2
-                self.z = (alpha_z * incoming_z) + ((1.0 - alpha_z) * self.z)
 
-    def integration_loop(self):
+        # ── Suscriptores ──────────────────────────────────────────────
+        self.vel_sub = self.create_subscription(
+            Odometry, '/drone1/odom',
+            self.odom_callback, 10
+        )
+        self.imu_sub = self.create_subscription(
+            Imu, '/drone1/imu',
+            self.imu_callback, 10
+        )
+
+        # ── Publicador ────────────────────────────────────────────────
+        self.odom_pub = self.create_publisher(
+            Odometry, '/drone1/integrated_odom', 10
+        )
+
+        # ── Parámetro de escala de velocidad ──────────────────────────
+        self.declare_parameter('vel_multiplier', 10.0)
+        self.multiplier = self.get_parameter(
+            'vel_multiplier'
+        ).get_parameter_value().double_value
+
+        # ── Estado del EKF ────────────────────────────────────────────
+        # x = [px, py, pz, vx, vy, vz, θ]
+        self.x = np.zeros(7)
+        self.P = np.eye(7) * 0.1            # Covarianza inicial
+
+        # ── Ruido de proceso (Q) ──────────────────────────────────────
+        self.Q = np.diag([
+            0.01,   # px  - poca incertidumbre en posición
+            0.01,   # py
+            0.01,   # pz
+            0.5,    # vx  - más incertidumbre en velocidad
+            0.5,    # vy
+            0.5,    # vz
+            0.01    # θ
+        ])
+
+        # ── Ruido de medición (R) por sensor ──────────────────────────
+        self.R_vel = np.diag([0.3, 0.3, 0.3])    # Flujo óptico (ruidoso)
+        self.R_tof = np.array([[0.05]])            # TOF (bastante preciso)
+        self.R_yaw = np.array([[0.1]])             # IMU yaw
+
+        # ── Matrices de observación (H) ───────────────────────────────
+        # Velocidad: observamos [vx, vy, vz] del estado
+        self.H_vel = np.zeros((3, 7))
+        self.H_vel[0, 3] = 1.0  # vx
+        self.H_vel[1, 4] = 1.0  # vy
+        self.H_vel[2, 5] = 1.0  # vz
+
+        # TOF: observamos pz del estado
+        self.H_tof = np.zeros((1, 7))
+        self.H_tof[0, 2] = 1.0  # pz
+
+        # Yaw IMU: observamos θ del estado
+        self.H_yaw = np.zeros((1, 7))
+        self.H_yaw[0, 6] = 1.0  # θ
+
+        # ── Variables auxiliares ───────────────────────────────────────
+        self.omega_z = 0.0                   # Velocidad angular actual
+        self.last_time = self.get_clock().now()
+        self.imu_yaw = None                  # Último yaw del IMU
+
+        # ── Control de TOF: solo durante takeoff ──────────────────────
+        self.takeoff_complete = False         # Se activa al alcanzar altura
+        self.declare_parameter('takeoff_height', 0.5)  # Umbral en metros
+        self.takeoff_height = self.get_parameter(
+            'takeoff_height'
+        ).get_parameter_value().double_value
+
+        # ── Bucle de predicción a 50 Hz ───────────────────────────────
+        self.timer = self.create_timer(0.02, self.predict_loop)
+
+        self.get_logger().info(
+            f"EKF Odometry iniciado (vel_multiplier={self.multiplier}, "
+            f"takeoff_height={self.takeoff_height}m)"
+        )
+
+    # ──────────────────────────────────────────────────────────────────
+    # CALLBACKS
+    # ──────────────────────────────────────────────────────────────────
+
+    def odom_callback(self, msg):
+        """Recibe velocidades del flujo óptico y altura del TOF."""
+        # 1. Leer velocidades en body frame y aplicar multiplicador
+        vx_body = msg.twist.twist.linear.x * self.multiplier
+        vy_body = msg.twist.twist.linear.y * self.multiplier
+        vz      = msg.twist.twist.linear.z * self.multiplier
+
+        # Guardamos omega_z para la predicción
+        self.omega_z = msg.twist.twist.angular.z
+
+        # 2. Rotar velocidad de body → world usando el θ estimado
+        theta = self.x[6]
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+        vx_world = vx_body * cos_t - vy_body * sin_t
+        vy_world = vx_body * sin_t + vy_body * cos_t
+
+        # 3. Corrección EKF con medición de velocidad
+        z_vel = np.array([vx_world, vy_world, vz])
+        self._ekf_update(z_vel, self.H_vel, self.R_vel)
+
+        # 4. Corrección EKF con medición de TOF (solo durante takeoff)
+        incoming_z = msg.pose.pose.position.z
+        if not self.takeoff_complete:
+            if 0.01 < incoming_z < 5.0:
+                z_tof = np.array([incoming_z])
+                self._ekf_update(z_tof, self.H_tof, self.R_tof)
+
+                # Verificar si el takeoff se completó
+                if incoming_z >= self.takeoff_height:
+                    self.takeoff_complete = True
+                    self.get_logger().info(
+                        f"Takeoff completado (TOF={incoming_z:.2f}m). "
+                        f"Cambiando a odometría pura para Z."
+                    )
+
+    def imu_callback(self, msg):
+        """Recibe la orientación del IMU para corregir el yaw."""
+        # Extraer yaw del quaternion
+        q = [
+            msg.orientation.x,
+            msg.orientation.y,
+            msg.orientation.z,
+            msg.orientation.w
+        ]
+        _, _, yaw = tf_transformations.euler_from_quaternion(q)
+
+        # Corrección EKF con medición de yaw
+        z_yaw = np.array([yaw])
+        self._ekf_update(z_yaw, self.H_yaw, self.R_yaw)
+
+    # ──────────────────────────────────────────────────────────────────
+    # EKF: PREDICCIÓN
+    # ──────────────────────────────────────────────────────────────────
+
+    def predict_loop(self):
+        """Paso de predicción del EKF a 50 Hz."""
         current_time = self.get_clock().now()
         dt = (current_time - self.last_time).nanoseconds / 1e9
-        
+
         if dt <= 0.0:
             return
             
-        # LÍMITE DE SEGURIDAD: Si la computadora se bloquea y dt es enorme, 
-        # lo limitamos a 0.1s para no "teletransportar" al dron
+        # LÍMITE DE SEGURIDAD (Nuestra mejora):
         if dt > 0.1:
-            self.get_logger().warn(f"Integrador bloqueado por {dt:.3f}s. Limitando dt a 0.1s para evitar saltos.")
+            self.get_logger().warn(f"EKF bloqueado por {dt:.3f}s. Limitando dt a 0.1s.")
             dt = 0.1
-            
-        # 1. Modelo Cinemático del Dron (Integración Euler Simple)
-        # Aquí ya NO necesitamos multiplicadores, porque estamos integrando la 
-        # lectura directa del SENSOR de velocidad (que ya viene en m/s puros)
-        
-        self.theta += self.w_z * dt
-        
-        # Rotación 2D para pasar de Body Frame a World Frame
-        world_v_x = self.v_x * math.cos(self.theta) - self.v_y * math.sin(self.theta)
-        world_v_y = self.v_x * math.sin(self.theta) + self.v_y * math.cos(self.theta)
-        
-        # Integración Numérica (x = x + v * dt)
-        self.x += world_v_x * dt
-        self.y += world_v_y * dt
-        
-        # NOTA: La Z ya no la integramos porque ahora usamos el sensor TOF absoluto 
-        # que seteamos en el callback. (Si z = 0, se queda en 0 hasta que suba).
-        
-        # 2. Publicar la Odometría
+
+        # 1. Modelo de predicción f(x, u)
+        px, py, pz, vx, vy, vz, theta = self.x
+
+        self.x[0] = px + vx * dt       # px
+        self.x[1] = py + vy * dt       # py
+        self.x[2] = pz + vz * dt       # pz
+        # vx, vy, vz se mantienen (modelo de velocidad constante)
+        self.x[6] = theta + self.omega_z * dt  # θ
+
+        # 2. Jacobiano F (derivada parcial de f respecto a x)
+        F = np.eye(7)
+        F[0, 3] = dt   # ∂px/∂vx
+        F[1, 4] = dt   # ∂py/∂vy
+        F[2, 5] = dt   # ∂pz/∂vz
+
+        # 3. Propagar covarianza: P = F * P * Fᵀ + Q
+        self.P = F @ self.P @ F.T + self.Q * dt
+
+        # 4. Publicar la odometría estimada
+        self._publish_odom(current_time)
+
+        self.last_time = current_time
+
+    # ──────────────────────────────────────────────────────────────────
+    # EKF: CORRECCIÓN (UPDATE)
+    # ──────────────────────────────────────────────────────────────────
+
+    def _ekf_update(self, z, H, R):
+        """Ejecuta el paso de corrección genérico del EKF."""
+        # 1. Innovación: y = z - H * x
+        y = z - H @ self.x
+
+        # 2. Covarianza de innovación: S = H * P * Hᵀ + R
+        S = H @ self.P @ H.T + R
+
+        # 3. Ganancia de Kalman: K = P * Hᵀ * S⁻¹
+        try:
+            K = self.P @ H.T @ np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            return
+
+        # 4. Actualizar estado: x = x + K * y
+        self.x = self.x + K @ y
+
+        # 5. Actualizar covarianza: P = (I - K * H) * P
+        I = np.eye(7)
+        self.P = (I - K @ H) @ self.P
+
+    # ──────────────────────────────────────────────────────────────────
+    # PUBLICACIÓN
+    # ──────────────────────────────────────────────────────────────────
+
+    def _publish_odom(self, stamp):
+        """Publica la odometría estimada por el EKF."""
         odom_msg = Odometry()
-        odom_msg.header.stamp = current_time.to_msg()
+        odom_msg.header.stamp = stamp.to_msg()
         odom_msg.header.frame_id = "odom"
         odom_msg.child_frame_id = "base_link"
-        
-        # Posición
-        odom_msg.pose.pose.position.x = self.x
-        odom_msg.pose.pose.position.y = self.y
-        odom_msg.pose.pose.position.z = self.z
-        
-        # Orientación (Convertir theta a cuaternión)
-        q = tf_transformations.quaternion_from_euler(0, 0, self.theta)
+
+        # Posición estimada
+        odom_msg.pose.pose.position.x = self.x[0]
+        odom_msg.pose.pose.position.y = self.x[1]
+        odom_msg.pose.pose.position.z = self.x[2]
+
+        # Orientación (θ → quaternion)
+        q = tf_transformations.quaternion_from_euler(0, 0, self.x[6])
         odom_msg.pose.pose.orientation.x = q[0]
         odom_msg.pose.pose.orientation.y = q[1]
         odom_msg.pose.pose.orientation.z = q[2]
         odom_msg.pose.pose.orientation.w = q[3]
-        
-        # Velocidades (Guardamos las globales por completitud)
-        odom_msg.twist.twist.linear.x = world_v_x
-        odom_msg.twist.twist.linear.y = world_v_y
-        odom_msg.twist.twist.linear.z = self.v_z
-        odom_msg.twist.twist.angular.z = self.w_z
-        
+
+        # Velocidades estimadas (en world frame)
+        odom_msg.twist.twist.linear.x = self.x[3]
+        odom_msg.twist.twist.linear.y = self.x[4]
+        odom_msg.twist.twist.linear.z = self.x[5]
+        odom_msg.twist.twist.angular.z = self.omega_z
+
         self.odom_pub.publish(odom_msg)
-        self.last_time = current_time
+
 
 def main(args=None):
     rclpy.init(args=args)
-    node = SimpleIntegratorOdom()
+    node = EKFOdometryNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -140,6 +274,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
