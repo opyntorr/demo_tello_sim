@@ -207,14 +207,7 @@ class EKFOdometryNode(Node):
     # ──────────────────────────────────────────────────────────────────
 
     def _ekf_update(self, z, H, R):
-        """
-        Paso de corrección genérico del EKF.
-        
-        Args:
-            z: Vector de medición (numpy array)
-            H: Matriz de observación (numpy array)
-            R: Matriz de covarianza de ruido de medición (numpy array)
-        """
+        """Ejecuta el paso de corrección genérico del EKF."""
         # 1. Innovación: y = z - H * x
         y = z - H @ self.x
 
