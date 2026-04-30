@@ -42,6 +42,11 @@ class TelloPositionController(Node):
         self.integral_y = 0.0
         self.integral_z = 0.0
         
+        # Filtro para la derivada
+        self.filtered_dx = 0.0
+        self.filtered_dy = 0.0
+        self.filtered_dz = 0.0
+        
         self.current_pose = None
         self.last_time = None
         self.start_time = None
@@ -93,8 +98,8 @@ class TelloPositionController(Node):
         
         twist = Twist()
         
-        # Tolerancia para detenerse (10 cm)
-        if distance > 0.10: 
+        # Tolerancia para detenerse (15 cm para evitar salir y entrar por ruido)
+        if distance > 0.15: 
             
             # 2. Calcular Integrales (I) y aplicar Anti-windup
             self.integral_x += error_x * dt
@@ -106,14 +111,20 @@ class TelloPositionController(Node):
             self.integral_z = max(min(self.integral_z, self.max_integral), -self.max_integral)
             
             # 3. Calcular Derivadas (D)
-            derivative_x = (error_x - self.prev_error_x) / dt
-            derivative_y = (error_y - self.prev_error_y) / dt
-            derivative_z = (error_z - self.prev_error_z) / dt
+            raw_dx = (error_x - self.prev_error_x) / dt
+            raw_dy = (error_y - self.prev_error_y) / dt
+            raw_dz = (error_z - self.prev_error_z) / dt
+            
+            # Suavizar derivada (EMA) para que el ruido de posición no haga picos locos
+            alpha_d = 0.2
+            self.filtered_dx = (alpha_d * raw_dx) + ((1.0 - alpha_d) * self.filtered_dx)
+            self.filtered_dy = (alpha_d * raw_dy) + ((1.0 - alpha_d) * self.filtered_dy)
+            self.filtered_dz = (alpha_d * raw_dz) + ((1.0 - alpha_d) * self.filtered_dz)
             
             # 4. Ecuación PID
-            vel_x = (self.kp * error_x) + (self.ki * self.integral_x) + (self.kd * derivative_x)
-            vel_y = (self.kp * error_y) + (self.ki * self.integral_y) + (self.kd * derivative_y)
-            vel_z = (self.kp * error_z) + (self.ki * self.integral_z) + (self.kd * derivative_z)
+            vel_x = (self.kp * error_x) + (self.ki * self.integral_x) + (self.kd * self.filtered_dx)
+            vel_y = (self.kp * error_y) + (self.ki * self.integral_y) + (self.kd * self.filtered_dy)
+            vel_z = (self.kp * error_z) + (self.ki * self.integral_z) + (self.kd * self.filtered_dz)
             
             # 5. Aplicar saturación (Clamp de velocidad)
             twist.linear.x = max(min(vel_x, self.max_vel), -self.max_vel)
@@ -121,13 +132,12 @@ class TelloPositionController(Node):
             twist.linear.z = max(min(vel_z, self.max_vel), -self.max_vel)
             
         else:
-            # Detener el dron al alcanzar el objetivo y resetear integrales
+            # Detener el dron al alcanzar el objetivo, pero NO resetear integrales.
+            # Conservar las integrales permite que el dron siga haciendo fuerza
+            # contra el viento o la deriva aerodinámica.
             twist.linear.x = 0.0
             twist.linear.y = 0.0
             twist.linear.z = 0.0
-            self.integral_x = 0.0
-            self.integral_y = 0.0
-            self.integral_z = 0.0
             self.get_logger().info("Posición objetivo alcanzada de forma estable", throttle_duration_sec=2.0)
             
         # Guardar estado para la siguiente iteración

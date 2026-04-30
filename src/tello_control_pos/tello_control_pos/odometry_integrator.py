@@ -49,16 +49,29 @@ class SimpleIntegratorOdom(Node):
         
     def velocity_sensor_callback(self, msg):
         # Usamos el multiplicador configurado (10.0 para real, 1.0 para simulación)
-        self.v_x = msg.twist.twist.linear.x * self.multiplier
-        self.v_y = msg.twist.twist.linear.y * self.multiplier
-        self.v_z = msg.twist.twist.linear.z * self.multiplier
-        self.w_z = msg.twist.twist.angular.z
+        raw_v_x = msg.twist.twist.linear.x * self.multiplier
+        raw_v_y = msg.twist.twist.linear.y * self.multiplier
+        raw_v_z = msg.twist.twist.linear.z * self.multiplier
+        raw_w_z = msg.twist.twist.angular.z
+        
+        # Filtro pasa-bajas (EMA) para suavizar la velocidad a 10Hz
+        alpha_v = 0.5
+        self.v_x = (alpha_v * raw_v_x) + ((1.0 - alpha_v) * self.v_x)
+        self.v_y = (alpha_v * raw_v_y) + ((1.0 - alpha_v) * self.v_y)
+        self.v_z = (alpha_v * raw_v_z) + ((1.0 - alpha_v) * self.v_z)
+        self.w_z = (alpha_v * raw_w_z) + ((1.0 - alpha_v) * self.w_z)
         
         # Leemos la altura absoluta (TOF) si está disponible
         incoming_z = msg.pose.pose.position.z
-        # Filtrar picos de error del sensor (ej. 65 metros cuando pierde señal)
+        
+        # Filtro de rango válido para el TOF
         if 0.01 < incoming_z < 5.0:
-            self.z = incoming_z
+            if self.z == 0.0:
+                self.z = incoming_z
+            else:
+                # Suavizado EMA para la Z (suaviza los picos de ruido sin bloquearse)
+                alpha_z = 0.2
+                self.z = (alpha_z * incoming_z) + ((1.0 - alpha_z) * self.z)
 
     def integration_loop(self):
         current_time = self.get_clock().now()
@@ -66,6 +79,12 @@ class SimpleIntegratorOdom(Node):
         
         if dt <= 0.0:
             return
+            
+        # LÍMITE DE SEGURIDAD: Si la computadora se bloquea y dt es enorme, 
+        # lo limitamos a 0.1s para no "teletransportar" al dron
+        if dt > 0.1:
+            self.get_logger().warn(f"Integrador bloqueado por {dt:.3f}s. Limitando dt a 0.1s para evitar saltos.")
+            dt = 0.1
             
         # 1. Modelo Cinemático del Dron (Integración Euler Simple)
         # Aquí ya NO necesitamos multiplicadores, porque estamos integrando la 
