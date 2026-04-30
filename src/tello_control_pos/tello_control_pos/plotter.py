@@ -81,6 +81,7 @@ class TelloPlotter(Node):
         # Timer para actualizar la gráfica (10 Hz)
         self.timer = self.create_timer(0.1, self.update_plot)
         self.messages_received = 0
+        self.last_log_time = self.get_clock().now()
 
     def odom_callback(self, msg):
         current_time = self.get_clock().now()
@@ -105,6 +106,15 @@ class TelloPlotter(Node):
         self.tz_history.append(self.target_z)
         self.messages_received += 1
 
+        # Log periódico para confirmar recepción de datos
+        now = self.get_clock().now()
+        if (now - self.last_log_time).nanoseconds / 1e9 > 5.0:
+            self.get_logger().info(
+                f"Datos recibidos: {self.messages_received} msgs, "
+                f"Z={pose.z:.2f}, puntos_en_grafica={len(self.time_history)}"
+            )
+            self.last_log_time = now
+
     def target_callback(self, msg):
         self.target_x = msg.x
         self.target_y = msg.y
@@ -122,42 +132,40 @@ class TelloPlotter(Node):
     def update_plot(self):
         if not self.time_history:
             return
-            
-        # Actualizar gráfica en tiempo real (cada 2 mensajes recibidos para no saturar)
-        if self.messages_received % 2 == 0:
-            try:
-                self.line3d.set_data(self.x_history, self.y_history)
-                self.line3d.set_3d_properties(self.z_history)
-                
-                self.target_line3d.set_data(self.tx_history, self.ty_history)
-                self.target_line3d.set_3d_properties(self.tz_history)
-                
-                self.line_x.set_data(self.time_history, self.x_history)
-                self.line_y.set_data(self.time_history, self.y_history)
-                self.line_z.set_data(self.time_history, self.z_history)
-                
-                self.target_line_x.set_data(self.time_history, self.tx_history)
-                self.target_line_y.set_data(self.time_history, self.ty_history)
-                self.target_line_z.set_data(self.time_history, self.tz_history)
-                
-                max_t = max(5.0, self.time_history[-1])
-                self.ax_x.set_xlim([0, max_t])
-                self.ax_y.set_xlim([0, max_t])
-                self.ax_z.set_xlim([0, max_t])
-                
-                min_x, max_x = min(self.x_history + [0, self.target_x]), max(self.x_history + [0, self.target_x])
-                self.ax_x.set_ylim([min_x - 0.5, max_x + 0.5])
-                
-                min_y, max_y = min(self.y_history + [0, self.target_y]), max(self.y_history + [0, self.target_y])
-                self.ax_y.set_ylim([min_y - 0.5, max_y + 0.5])
-                
-                min_z, max_z = min(self.z_history + [0, self.target_z]), max(self.z_history + [0, self.target_z])
-                self.ax_z.set_ylim([min_z - 0.5, max_z + 0.5])
-                
-                self.fig.canvas.draw()
-                self.fig.canvas.flush_events()
-            except Exception as e:
-                pass
+
+        try:
+            self.line3d.set_data(self.x_history, self.y_history)
+            self.line3d.set_3d_properties(self.z_history)
+
+            self.target_line3d.set_data(self.tx_history, self.ty_history)
+            self.target_line3d.set_3d_properties(self.tz_history)
+
+            self.line_x.set_data(self.time_history, self.x_history)
+            self.line_y.set_data(self.time_history, self.y_history)
+            self.line_z.set_data(self.time_history, self.z_history)
+
+            self.target_line_x.set_data(self.time_history, self.tx_history)
+            self.target_line_y.set_data(self.time_history, self.ty_history)
+            self.target_line_z.set_data(self.time_history, self.tz_history)
+
+            max_t = max(5.0, self.time_history[-1])
+            self.ax_x.set_xlim([0, max_t])
+            self.ax_y.set_xlim([0, max_t])
+            self.ax_z.set_xlim([0, max_t])
+
+            min_x, max_x = min(self.x_history + [0, self.target_x]), max(self.x_history + [0, self.target_x])
+            self.ax_x.set_ylim([min_x - 0.5, max_x + 0.5])
+
+            min_y, max_y = min(self.y_history + [0, self.target_y]), max(self.y_history + [0, self.target_y])
+            self.ax_y.set_ylim([min_y - 0.5, max_y + 0.5])
+
+            min_z, max_z = min(self.z_history + [0, self.target_z]), max(self.z_history + [0, self.target_z])
+            self.ax_z.set_ylim([min_z - 0.5, max_z + 0.5])
+
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+        except Exception as e:
+            self.get_logger().warn(f"Error actualizando gráfica: {e}", throttle_duration_sec=5.0)
 
     def exportar_datos(self):
         dir_path = "/ros2_ws/src/tello_control_pos/tello_control_pos/"
@@ -209,16 +217,38 @@ class TelloPlotter(Node):
         self.get_logger().info(f"Reportes de gráficas actualizados en: {dir_path}")
 
 def main(args=None):
+    import signal
+
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = TelloPlotter()
+
+    # Flag para evitar exportar dos veces
+    exported = [False]
+
+    def shutdown_handler(sig, frame):
+        """Exportar datos inmediatamente al recibir señal, antes de que Tkinter interfiera."""
+        if not exported[0]:
+            exported[0] = True
+            node.get_logger().info("Señal recibida. Generando archivos finales...")
+            node.exportar_datos()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
+
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
-        node.get_logger().info("Deteniendo graficador y generando archivos finales...")
-        node.exportar_datos()
+    except (KeyboardInterrupt, SystemExit):
+        if not exported[0]:
+            exported[0] = True
+            node.get_logger().info("Deteniendo graficador y generando archivos finales...")
+            node.exportar_datos()
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 if __name__ == '__main__':
     main()

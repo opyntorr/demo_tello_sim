@@ -4,11 +4,15 @@ Nodo de Odometría con Filtro de Kalman Extendido (EKF).
 
 Fusiona tres fuentes de datos para estimar la posición del dron:
   1. Velocidades del flujo óptico (body frame) → /drone1/odom
-  2. Altura absoluta del sensor TOF              → /drone1/odom
+  2. Altura absoluta del sensor TOF              → /drone1/odom (solo durante takeoff)
   3. Orientación (yaw) del IMU                   → /drone1/imu
 
 Vector de estado (7 elementos):
   x = [px, py, pz, vx, vy, vz, θ]ᵀ
+
+El TOF solo se utiliza para establecer la altura inicial durante el
+despegue. Una vez completado, la altura se estima únicamente por
+integración de velocidad (odometría).
 
 Publica la odometría filtrada en /drone1/integrated_odom,
 manteniendo la misma interfaz que el integrador simple anterior.
@@ -93,11 +97,19 @@ class EKFOdometryNode(Node):
         self.last_time = self.get_clock().now()
         self.imu_yaw = None                  # Último yaw del IMU
 
+        # ── Control de TOF: solo durante takeoff ──────────────────────
+        self.takeoff_complete = False         # Se activa al alcanzar altura
+        self.declare_parameter('takeoff_height', 0.5)  # Umbral en metros
+        self.takeoff_height = self.get_parameter(
+            'takeoff_height'
+        ).get_parameter_value().double_value
+
         # ── Bucle de predicción a 50 Hz ───────────────────────────────
         self.timer = self.create_timer(0.02, self.predict_loop)
 
         self.get_logger().info(
-            f"EKF Odometry iniciado (vel_multiplier={self.multiplier})"
+            f"EKF Odometry iniciado (vel_multiplier={self.multiplier}, "
+            f"takeoff_height={self.takeoff_height}m)"
         )
 
     # ──────────────────────────────────────────────────────────────────
@@ -125,11 +137,20 @@ class EKFOdometryNode(Node):
         z_vel = np.array([vx_world, vy_world, vz])
         self._ekf_update(z_vel, self.H_vel, self.R_vel)
 
-        # 4. Corrección EKF con medición de TOF (si es válida)
+        # 4. Corrección EKF con medición de TOF (solo durante takeoff)
         incoming_z = msg.pose.pose.position.z
-        if 0.01 < incoming_z < 5.0:
-            z_tof = np.array([incoming_z])
-            self._ekf_update(z_tof, self.H_tof, self.R_tof)
+        if not self.takeoff_complete:
+            if 0.01 < incoming_z < 5.0:
+                z_tof = np.array([incoming_z])
+                self._ekf_update(z_tof, self.H_tof, self.R_tof)
+
+                # Verificar si el takeoff se completó
+                if incoming_z >= self.takeoff_height:
+                    self.takeoff_complete = True
+                    self.get_logger().info(
+                        f"Takeoff completado (TOF={incoming_z:.2f}m). "
+                        f"Cambiando a odometría pura para Z."
+                    )
 
     def imu_callback(self, msg):
         """Recibe la orientación del IMU para corregir el yaw."""
