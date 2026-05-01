@@ -11,7 +11,7 @@ class TelloPositionController(Node):
         
         # Publicadores y Suscriptores
         self.cmd_vel_pub = self.create_publisher(Twist, '/drone1/cmd_vel', 10)
-        self.odom_sub = self.create_subscription(Odometry, '/drone1/integrated_odom', self.odom_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/odometry/filtered', self.odom_callback, 10)
         self.target_sub = self.create_subscription(Point, '/drone1/target_position', self.target_callback, 10)
         
         # Posición objetivo inicializada en None (esperando comando)
@@ -20,10 +20,13 @@ class TelloPositionController(Node):
         self.target_z = None
         self.target_received = False
         
-        # Ganancias del controlador PID
-        self.kp = 0.8   # Aumentado para superar la inercia del dron real
-        self.ki = 0.02  # Corrección a largo plazo
-        self.kd = 0.35  # Freno aerodinámico
+        # Ganancias del controlador PID (Configurables)
+        self.declare_parameter('kp', 0.8)
+        self.declare_parameter('ki', 0.02)
+        self.declare_parameter('kd', 0.35)
+        self.kp = self.get_parameter('kp').get_parameter_value().double_value
+        self.ki = self.get_parameter('ki').get_parameter_value().double_value
+        self.kd = self.get_parameter('kd').get_parameter_value().double_value
         
         # Límites de saturación
         self.max_vel = 0.5          # Velocidad máxima estricta (50 cm/s)
@@ -32,6 +35,8 @@ class TelloPositionController(Node):
         # Escala de velocidad (1.0 para Gazebo, 100.0 para Tello real)
         self.declare_parameter('velocity_scale', 1.0)
         self.vel_scale = self.get_parameter('velocity_scale').get_parameter_value().double_value
+        
+
         
         # Memoria de estado para derivadas e integrales
         self.prev_error_x = 0.0
@@ -42,10 +47,7 @@ class TelloPositionController(Node):
         self.integral_y = 0.0
         self.integral_z = 0.0
         
-        # Filtro para la derivada
-        self.filtered_dx = 0.0
-        self.filtered_dy = 0.0
-        self.filtered_dz = 0.0
+
         
         self.current_pose = None
         self.last_time = None
@@ -115,16 +117,10 @@ class TelloPositionController(Node):
             raw_dy = (error_y - self.prev_error_y) / dt
             raw_dz = (error_z - self.prev_error_z) / dt
             
-            # Suavizar derivada (EMA) para que el ruido de posición no haga picos locos
-            alpha_d = 0.2
-            self.filtered_dx = (alpha_d * raw_dx) + ((1.0 - alpha_d) * self.filtered_dx)
-            self.filtered_dy = (alpha_d * raw_dy) + ((1.0 - alpha_d) * self.filtered_dy)
-            self.filtered_dz = (alpha_d * raw_dz) + ((1.0 - alpha_d) * self.filtered_dz)
-            
-            # 4. Ecuación PID
-            vel_x = (self.kp * error_x) + (self.ki * self.integral_x) + (self.kd * self.filtered_dx)
-            vel_y = (self.kp * error_y) + (self.ki * self.integral_y) + (self.kd * self.filtered_dy)
-            vel_z = (self.kp * error_z) + (self.ki * self.integral_z) + (self.kd * self.filtered_dz)
+            # 4. Ecuación PID (usando derivadas crudas)
+            vel_x = (self.kp * error_x) + (self.ki * self.integral_x) + (self.kd * raw_dx)
+            vel_y = (self.kp * error_y) + (self.ki * self.integral_y) + (self.kd * raw_dy)
+            vel_z = (self.kp * error_z) + (self.ki * self.integral_z) + (self.kd * raw_dz)
             
             # 5. Aplicar saturación (Clamp de velocidad)
             twist.linear.x = max(min(vel_x, self.max_vel), -self.max_vel)

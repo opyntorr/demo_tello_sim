@@ -15,7 +15,7 @@ class TelloPlotter(Node):
         super().__init__('tello_plotter')
         
         # Suscriptor a la odometría y a la meta
-        self.odom_sub = self.create_subscription(Odometry, '/drone1/integrated_odom', self.odom_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/odometry/filtered', self.odom_callback, 10)
         self.target_sub = self.create_subscription(Point, '/drone1/target_position', self.target_callback, 10)
         
         # Posición objetivo inicial

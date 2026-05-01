@@ -1,9 +1,13 @@
 import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction
 
 def generate_launch_description():
+    pkg_dir = get_package_share_directory('tello_control_pos')
+    ekf_config_path = os.path.join(pkg_dir, 'config', 'ekf.yaml')
+
     return LaunchDescription([
         # 1. Driver del Tello Real (Se conecta por WiFi al dron físico)
         Node(
@@ -16,18 +20,30 @@ def generate_launch_description():
             ]
         ),
         
-        # 2. Odometry Integrator (Escucha al dron real y calcula la posición)
+        # 2. Inyector de Covarianza (Escucha al dron real y añade ruido para el EKF)
         Node(
             package='tello_control_pos',
             executable='odometry_integrator',
-            name='odometry_integrator',
+            name='covariance_injector',
             output='screen',
             remappings=[
                 ('/drone1/odom', '/odom')  # Remapeo al tópico del dron real
             ]
         ),
         
-        # 3. Graficador
+        # 3. Ejecutar EKF (robot_localization)
+        Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_filter_node',
+            output='screen',
+            parameters=[
+                ekf_config_path,
+                {'use_sim_time': False}
+            ]
+        ),
+        
+        # 4. Graficador
         Node(
             package='tello_control_pos',
             executable='plotter',
@@ -35,7 +51,7 @@ def generate_launch_description():
             output='screen'
         ),
         
-        # 4. Controlador de Posición
+        # 5. Controlador de Posición
         Node(
             package='tello_control_pos',
             executable='position_controller',
@@ -49,7 +65,7 @@ def generate_launch_description():
             ]
         ),
         
-        # 5. Enviar comando de takeoff al dron real (Retrasado para asegurar conexión)
+        # 6. Enviar comando de takeoff al dron real (Retrasado para asegurar conexión)
         TimerAction(
             period=4.0,  # 4 segundos para darle tiempo al nodo tello de conectarse al WiFi
             actions=[
