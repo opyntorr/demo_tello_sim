@@ -22,15 +22,15 @@ class TelloPositionController(Node):
         
         # Ganancias del controlador PID (Configurables)
         self.declare_parameter('kp', 0.8)
-        self.declare_parameter('ki', 0.02)
+        self.declare_parameter('ki', 0.04)
         self.declare_parameter('kd', 0.35)
         self.kp = self.get_parameter('kp').get_parameter_value().double_value
         self.ki = self.get_parameter('ki').get_parameter_value().double_value
         self.kd = self.get_parameter('kd').get_parameter_value().double_value
         
         # Límites de saturación
-        self.max_vel = 0.5          # Velocidad máxima estricta (50 cm/s)
-        self.max_integral = 1.0     # Límite de acumulación
+        self.max_vel = 0.25          # Velocidad máxima estricta (50 cm/s)
+        self.max_integral = 2.0     # Límite de acumulación
         
         # Escala de velocidad (1.0 para Gazebo, 100.0 para Tello real)
         self.declare_parameter('velocity_scale', 1.0)

@@ -11,11 +11,11 @@
           </box>
         </geometry>
         <material>
-          <script>
+          <diffuse>1 1 1 1</diffuse><pbr><metal><albedo_map>model://marker_1/materials/textures/aruco_mark_1.png</albedo_map></metal></pbr><!-- <script>
             <uri>model://marker_1/materials/scripts</uri>
             <uri>model://marker_1/materials/textures</uri>
             <name>ArucoVisualMarker1/Marker</name>
-          </script>
+          </script> -->
           <ambient>1 1 1 1</ambient>
           <diffuse>1 1 1 1</diffuse>
           <specular>0 0 0 1</specular>
@@ -50,10 +50,10 @@
         </geometry>
         <material>
           <lighting>1</lighting>
-          <script>
+          <diffuse>1 1 1 1</diffuse><pbr><metal><albedo_map>model://marker_1/materials/textures/aruco_mark_1.png</albedo_map></metal></pbr><!-- <script>
             <uri>file://media/materials/scripts/gazebo.material</uri>
             <name>Gazebo/White</name>
-          </script>
+          </script> -->
           <ambient>0.3 0.3 0.3 1</ambient>
           <diffuse>0.7 0.7 0.7 1</diffuse>
           <specular>0.01 0.01 0.01 1</specular>

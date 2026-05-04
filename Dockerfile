@@ -4,8 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Instalar Gazebo (Classic e Ignition), puente de ROS, herramientas de visión, dependencias del Tello y utilidades
 RUN apt-get update && apt-get install -y \
-    ros-humble-ros-gz \
-    ros-humble-gazebo-ros-pkgs \
+    ros-humble-ros-ign-gazebo \
+    ros-humble-ros-ign-bridge \
     ros-humble-vision-msgs \
     ros-humble-robot-localization \
     ros-humble-xacro \
