@@ -8,26 +8,17 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-22.04
-    container: ros:humble-ros-base
     steps:
       - uses: actions/checkout@v4
 
       - name: Install lint deps
-        run: |
-          apt-get update
-          pip3 install flake8 pep257
+        run: pip install flake8 pep257
 
       - name: flake8
-        shell: bash
-        run: |
-          source /opt/ros/humble/setup.bash
-          ament_flake8 src/tello_control_pos
+        run: flake8 src/tello_control_pos
 
       - name: pep257
-        shell: bash
-        run: |
-          source /opt/ros/humble/setup.bash
-          ament_pep257 src/tello_control_pos
+        run: pep257 src/tello_control_pos
 
   unit:
     runs-on: ubuntu-22.04
