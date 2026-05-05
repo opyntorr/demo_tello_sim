@@ -178,6 +178,11 @@ class EKFOdometryNode(Node):
 
         if dt <= 0.0:
             return
+            
+        # LÍMITE DE SEGURIDAD (Nuestra mejora):
+        if dt > 0.1:
+            self.get_logger().warn(f"EKF bloqueado por {dt:.3f}s. Limitando dt a 0.1s.")
+            dt = 0.1
 
         # 1. Modelo de predicción f(x, u)
         px, py, pz, vx, vy, vz, theta = self.x
@@ -215,7 +220,10 @@ class EKFOdometryNode(Node):
         S = H @ self.P @ H.T + R
 
         # 3. Ganancia de Kalman: K = P * Hᵀ * S⁻¹
-        K = self.P @ H.T @ np.linalg.inv(S)
+        try:
+            K = self.P @ H.T @ np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            return
 
         # 4. Actualizar estado: x = x + K * y
         self.x = self.x + K @ y
