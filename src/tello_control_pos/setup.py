@@ -30,7 +30,8 @@ setup(
         'console_scripts': [
             'position_controller = tello_control_pos.controller:main',
             'odometry_integrator = tello_control_pos.odometry_integrator:main',
-            'plotter = tello_control_pos.plotter:main'
+            'plotter = tello_control_pos.plotter:main',
+            'optitrack_simulator = tello_control_pos.optitrack_simulator:main'
         ],
     },
 )

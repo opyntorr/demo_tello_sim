@@ -29,6 +29,8 @@ ekf_filter_node:
         odom0_differential: false
         odom0_relative: false
         
+
+        
         # Process noise covariance matrix
         # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
         # Tuning: If the filter lags, increase these numbers. If it's too noisy, decrease them.

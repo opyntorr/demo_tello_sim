@@ -2,11 +2,13 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import ExecuteProcess, TimerAction
+from launch.actions import ExecuteProcess, TimerAction, RegisterEventHandler
+from launch.event_handlers import OnShutdown
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('tello_control_pos')
     ekf_config_path = os.path.join(pkg_dir, 'config', 'ekf.yaml')
+    optitrack_config_path = os.path.join(pkg_dir, 'config', 'optitrack.yaml')
 
     return LaunchDescription([
         # 1. Driver del Tello Real (Se conecta por WiFi al dron físico)
@@ -27,7 +29,8 @@ def generate_launch_description():
             name='covariance_injector',
             output='screen',
             remappings=[
-                ('/drone1/odom', '/odom')  # Remapeo al tópico del dron real
+                ('/drone1/odom', '/odom'),      # Remapeo al tópico del dron real
+                ('/drone_pose', '/m1/pose')      # Remapeo al tópico del OptiTrack real
             ]
         ),
         
@@ -39,6 +42,7 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 ekf_config_path,
+                optitrack_config_path,
                 {'use_sim_time': False}
             ]
         ),
@@ -79,5 +83,22 @@ def generate_launch_description():
                     output='screen'
                 )
             ]
+        ),
+        
+        # 7. Al cerrar con Ctrl+C, enviar comando de aterrizaje
+        RegisterEventHandler(
+            OnShutdown(
+                on_shutdown=[
+                    ExecuteProcess(
+                        cmd=[
+                            'ros2', 'topic', 'pub', '--once',
+                            '/land',
+                            'std_msgs/msg/Empty',
+                            '{}'
+                        ],
+                        output='screen'
+                    )
+                ]
+            )
         )
     ])

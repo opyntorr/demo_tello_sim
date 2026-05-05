@@ -7,6 +7,7 @@ from launch.actions import ExecuteProcess, TimerAction
 def generate_launch_description():
     pkg_dir = get_package_share_directory('tello_control_pos')
     ekf_config_path = os.path.join(pkg_dir, 'config', 'ekf.yaml')
+    optitrack_config_path = os.path.join(pkg_dir, 'config', 'optitrack.yaml')
 
     return LaunchDescription([
         # 1. Ejecutar inyector de covarianza
@@ -29,6 +30,7 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 ekf_config_path,
+                optitrack_config_path,
                 {'use_sim_time': True}
             ]
         ),
@@ -56,7 +58,19 @@ def generate_launch_description():
             ]
         ),
         
-        # 5. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
+        # 5. Ejecutar optitrack_simulator
+        Node(
+            package='tello_control_pos',
+            executable='optitrack_simulator',
+            name='optitrack_simulator',
+            output='screen',
+            parameters=[
+                {'use_sim_time': True},
+                {'latency_sec': 0.1}
+            ]
+        ),
+        
+        # 6. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
         TimerAction(
             period=3.0,
             actions=[
