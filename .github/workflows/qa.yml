@@ -15,7 +15,7 @@ jobs:
         run: pip install flake8 pep257
 
       - name: flake8
-        run: flake8 src/tello_control_pos
+        run: flake8 --config src/tello_control_pos/setup.cfg src/tello_control_pos
 
       - name: pep257
         run: pep257 src/tello_control_pos
