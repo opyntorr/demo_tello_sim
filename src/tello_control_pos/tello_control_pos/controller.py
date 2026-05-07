@@ -21,9 +21,9 @@ class TelloPositionController(Node):
         self.target_received = False
         
         # Ganancias del controlador PID (Configurables)
-        self.declare_parameter('kp', 0.8)
-        self.declare_parameter('ki', 0.04)
-        self.declare_parameter('kd', 0.35)
+        self.declare_parameter('kp', 0.3)
+        self.declare_parameter('ki', 0.2)
+        self.declare_parameter('kd', 0.0)
         self.kp = self.get_parameter('kp').get_parameter_value().double_value
         self.ki = self.get_parameter('ki').get_parameter_value().double_value
         self.kd = self.get_parameter('kd').get_parameter_value().double_value

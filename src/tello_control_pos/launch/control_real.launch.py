@@ -23,29 +23,29 @@ def generate_launch_description():
         ),
         
         # 2. Inyector de Covarianza (Escucha al dron real y añade ruido para el EKF)
-        Node(
-            package='tello_control_pos',
-            executable='odometry_integrator',
-            name='covariance_injector',
-            output='screen',
-            remappings=[
-                ('/drone1/odom', '/odom'),      # Remapeo al tópico del dron real
-                ('/drone_pose', '/m1/pose')      # Remapeo al tópico del OptiTrack real
-            ]
-        ),
+        # Node(
+        #     package='tello_control_pos',
+        #     executable='odometry_integrator',
+        #     name='covariance_injector',
+        #     output='screen',
+        #     remappings=[
+        #         ('/drone1/odom', '/odom'),      # Remapeo al tópico del dron real
+        #         ('/drone_pose', '/drone/pose')      # Remapeo al tópico del OptiTrack real
+        #     ]
+        # ),
         
         # 3. Ejecutar EKF (robot_localization)
-        Node(
-            package='robot_localization',
-            executable='ekf_node',
-            name='ekf_filter_node',
-            output='screen',
-            parameters=[
-                ekf_config_path,
-                optitrack_config_path,
-                {'use_sim_time': False}
-            ]
-        ),
+        # Node(
+        #     package='robot_localization',
+        #     executable='ekf_node',
+        #     name='ekf_filter_node',
+        #     output='screen',
+        #     parameters=[
+        #         ekf_config_path,
+        #         optitrack_config_path,
+        #         {'use_sim_time': False}
+        #     ]
+        # ),
         
         # 4. Graficador
         Node(
@@ -56,18 +56,18 @@ def generate_launch_description():
         ),
         
         # 5. Controlador de Posición
-        Node(
-            package='tello_control_pos',
-            executable='position_controller',
-            name='position_controller',
-            output='screen',
-            remappings=[
-                ('/drone1/cmd_vel', '/control')  # Remapeo al tópico del dron real
-            ],
-            parameters=[
-                {'velocity_scale': 100.0}
-            ]
-        ),
+        # Node(
+        #     package='tello_control_pos',
+        #     executable='position_controller',
+        #     name='position_controller',
+        #     output='screen',
+        #     remappings=[
+        #         ('/drone1/cmd_vel', '/control')  # Remapeo al tópico del dron real
+        #     ],
+        #     parameters=[
+        #         {'velocity_scale': 100.0}
+        #     ]
+        # ),
         
         # 6. Enviar comando de takeoff al dron real (Retrasado para asegurar conexión)
         TimerAction(
