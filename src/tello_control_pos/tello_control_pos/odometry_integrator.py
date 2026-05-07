@@ -90,10 +90,10 @@ class CovarianceInjector(Node):
         pose_cov_msg.header.stamp = self.get_clock().now().to_msg()
         pose_cov_msg.header.frame_id = "odom"
         
-        # Intercambiar ejes Y y Z (Dado que OptiTrack usa Y hacia arriba)
+        # Usar sistema normal x,y,z para OptiTrack
         pose_cov_msg.pose.pose.position.x = msg.pose.position.x
-        pose_cov_msg.pose.pose.position.y = msg.pose.position.z
-        pose_cov_msg.pose.pose.position.z = msg.pose.position.y
+        pose_cov_msg.pose.pose.position.y = msg.pose.position.y
+        pose_cov_msg.pose.pose.position.z = msg.pose.position.z
         
         # Orientación (no se usa, establecer a identidad)
         pose_cov_msg.pose.pose.orientation.x = 0.0

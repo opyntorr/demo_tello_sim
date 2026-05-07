@@ -59,11 +59,10 @@ class OptitrackSimulator(Node):
             pose_stamped.header.stamp = self.get_clock().now().to_msg()
             pose_stamped.header.frame_id = "optitrack"
             
-            # En OptiTrack, el eje Y está hacia arriba. En ROS, Z está hacia arriba.
-            # Intercambiamos Y y Z para simular cómo enviaría los datos el sistema real.
+            # En OptiTrack, usaremos el sistema normal x,y,z.
             pose_stamped.pose.position.x = msg_to_publish.pose.pose.position.x
-            pose_stamped.pose.position.y = msg_to_publish.pose.pose.position.z
-            pose_stamped.pose.position.z = msg_to_publish.pose.pose.position.y
+            pose_stamped.pose.position.y = msg_to_publish.pose.pose.position.y
+            pose_stamped.pose.position.z = msg_to_publish.pose.pose.position.z
             
             # Orientación (no se usa, establecer a identidad)
             pose_stamped.pose.orientation.x = 0.0
