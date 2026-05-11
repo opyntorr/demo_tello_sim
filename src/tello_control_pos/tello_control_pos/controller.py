@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist, Point
+from geometry_msgs.msg import Twist, Point, Quaternion
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Empty
 import math
@@ -25,7 +25,6 @@ class TelloPositionController(Node):
         self.target_z = None
         self.target_received = False
         self.has_taken_off = False
-        self.takeoff_complete_time = None
         
         # Ganancias del controlador PID (Configurables)
         self.declare_parameter('kp', 2.5)
@@ -67,6 +66,7 @@ class TelloPositionController(Node):
         self.filtered_dz = 0.0
         
         self.current_pose = None
+        self.current_orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
         self.last_time = None
         self.start_time = None
         
@@ -106,26 +106,14 @@ class TelloPositionController(Node):
             
         current_time = self.get_clock().now()
             
-        # Seguridad: Esperar a que el dron termine el despegue físico
+        # Seguridad: no controlar hasta que el dron haya superado la altura de despegue
         if not self.has_taken_off:
             if self.current_pose.z < 0.8:
-                self.get_logger().info("Esperando a que termine el despegue (Z < 0.8m)...", throttle_duration_sec=2.0)
-                self.cmd_vel_pub.publish(Twist()) # Enviar comandos 0 para que el drift actúe
+                self.get_logger().info("Esperando despegue (Z < 0.8m)...", throttle_duration_sec=2.0)
                 return
-            else:
-                self.has_taken_off = True
-                self.takeoff_complete_time = current_time
-                self.get_logger().info("¡Despegue detectado! Esperando estabilización macro (1.5s).")
-                self.cmd_vel_pub.publish(Twist())
-                return
-                
-        # Fase de estabilización: Permitir que el Tello termine su macro interno
-        dt_since_takeoff = (current_time - self.takeoff_complete_time).nanoseconds / 1e9
-        if dt_since_takeoff < 1.5:
-            self.get_logger().info(f"Estabilizando despegue ({dt_since_takeoff:.1f}/1.5s)...", throttle_duration_sec=0.5)
-            self.cmd_vel_pub.publish(Twist())
-            return
-            
+            self.has_taken_off = True
+            self.get_logger().info("Despegue detectado. Iniciando control de posicion.")
+
         # Capturar la posición actual como meta (Hover automático) si aún no hemos recibido un objetivo manual
         if not self.target_received:
             self.target_x = self.current_pose.x
