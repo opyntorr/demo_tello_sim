@@ -36,25 +36,21 @@ class TelloPositionController(Node):
         self.kd = self.get_parameter('kd').get_parameter_value().double_value
         
         # Límites de saturación
-        self.max_vel = 0.6          # Velocidad máxima estricta (50 cm/s)
+        self.max_vel = 0.6          # Velocidad máxima normal
+        self.max_vel_safety = 1.0   # Techo de velocidad en modo seguridad
+        self.safety_gain = 2.0      # Cuánto crece la velocidad por metro² fuera del límite
         self.max_integral = 1.0     # Límite de acumulación
+
+        # Zona de vuelo segura
+        self.limit_xy    =  2.0
+        self.limit_z_min =  0.4
+        self.limit_z_max =  2.5
+
+        self.in_safety_mode = False
         
         # Escala de velocidad (1.0 para Gazebo, 100.0 para Tello real)
         self.declare_parameter('velocity_scale', 1.0)
         self.vel_scale = self.get_parameter('velocity_scale').get_parameter_value().double_value
-        
-        # --- NUEVOS PARÁMETROS DE SEGURIDAD ---
-        self.declare_parameter('max_altitude', 3.0)     # Altura máxima permitida
-        self.declare_parameter('min_altitude', 0.2)     # Altura mínima para considerar vuelo
-        self.declare_parameter('max_xy_radius', 4.0)    # Radio máximo desde el origen (0,0)
-        self.declare_parameter('odom_timeout', 0.5)     # Tiempo máximo sin odometría (segundos)
-        
-        self.max_alt = self.get_parameter('max_altitude').get_parameter_value().double_value
-        self.min_alt = self.get_parameter('min_altitude').get_parameter_value().double_value
-        self.max_xy = self.get_parameter('max_xy_radius').get_parameter_value().double_value
-        self.odom_timeout = self.get_parameter('odom_timeout').get_parameter_value().double_value
-        
-
         
         # Memoria de estado para derivadas e integrales
         self.prev_error_x = 0.0
@@ -71,9 +67,7 @@ class TelloPositionController(Node):
         self.filtered_dz = 0.0
         
         self.current_pose = None
-        self.current_orientation = None
         self.last_time = None
-        self.last_odom_time = self.get_clock().now()
         self.start_time = None
         
         # Bucle de control a 100 Hz (sincronizado con OptiTrack a 120 Hz)
@@ -87,49 +81,30 @@ class TelloPositionController(Node):
     def odom_callback(self, msg):
         self.current_pose = msg.pose.pose.position
         self.current_orientation = msg.pose.pose.orientation
-        self.last_odom_time = self.get_clock().now()
         
         
     def target_callback(self, msg):
-        self.target_x = msg.x
-        self.target_y = msg.y
-        self.target_z = msg.z
+        x = max(min(msg.x,  1.8), -1.8)
+        y = max(min(msg.y,  1.8), -1.8)
+        z = max(min(msg.z,  2.5),  0.3)
+
+        if x != msg.x or y != msg.y or z != msg.z:
+            self.get_logger().warn(
+                f"Objetivo fuera de límites ({msg.x:.2f}, {msg.y:.2f}, {msg.z:.2f}) "
+                f"— ajustado a ({x:.2f}, {y:.2f}, {z:.2f})"
+            )
+
+        self.target_x = x
+        self.target_y = y
+        self.target_z = z
         self.target_received = True
-        self.get_logger().info(f"Nuevo objetivo recibido: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
+        self.get_logger().info(f"Nuevo objetivo: X={self.target_x:.2f}, Y={self.target_y:.2f}, Z={self.target_z:.2f}")
         
     def control_loop(self):
-        if not self.active:
-            return
-
-        current_time = self.get_clock().now()
-        
-        # 1. SEGURIDAD: Verificar Watchdog de Odometría (Pérdida de localización)
-        dt_odom = (current_time - self.last_odom_time).nanoseconds / 1e9
-        if dt_odom > self.odom_timeout:
-            self.get_logger().error(f"¡LOCALIZACIÓN PERDIDA! Hace {dt_odom:.2f}s. Deteniendo motores.", throttle_duration_sec=1.0)
-            self.cmd_vel_pub.publish(Twist())
-            return
-
-        if self.current_pose is None:
+        if not self.active or self.current_pose is None:
             return
             
-        # 2. SEGURIDAD: Geofencing (Límites de espacio)
-        # Altura máxima
-        if self.current_pose.z > self.max_alt:
-            self.get_logger().warn(f"¡Límite de altura excedido! ({self.current_pose.z:.2f}m > {self.max_alt}m)", throttle_duration_sec=1.0)
-            # Forzar aterrizaje o comando de descenso agresivo
-            twist = Twist()
-            twist.linear.z = -0.5 * self.vel_scale
-            self.cmd_vel_pub.publish(twist)
-            return
-
-        # Radio XY
-        dist_xy = math.sqrt(self.current_pose.x**2 + self.current_pose.y**2)
-        if dist_xy > self.max_xy:
-            self.get_logger().error(f"¡FUERA DE RANGO XY! ({dist_xy:.2f}m > {self.max_xy}m). Regresando...", throttle_duration_sec=1.0)
-            # Aquí podríamos implementar un "Return to Home", por ahora solo detenemos
-            self.cmd_vel_pub.publish(Twist())
-            return
+        current_time = self.get_clock().now()
             
         # Seguridad: Esperar a que el dron termine el despegue físico
         if not self.has_taken_off:
@@ -168,64 +143,91 @@ class TelloPositionController(Node):
         if dt <= 0.0:
             return
             
+        # --- ZONA SEGURA: velocidad máxima escala cuadráticamente fuera del límite ---
+        p = self.current_pose
+        overshoot_x = max(0.0, abs(p.x) - self.limit_xy)
+        overshoot_y = max(0.0, abs(p.y) - self.limit_xy)
+        overshoot_z = max(0.0, p.z - self.limit_z_max) + max(0.0, self.limit_z_min - p.z)
+        overshoot = math.sqrt(overshoot_x**2 + overshoot_y**2 + overshoot_z**2)
+
+        active_max_vel = min(self.max_vel + self.safety_gain * overshoot**2, self.max_vel_safety)
+
+        outside = overshoot > 0.0
+        if outside:
+            if not self.in_safety_mode:
+                self.in_safety_mode = True
+                self.integral_x = 0.0
+                self.integral_y = 0.0
+                self.integral_z = 0.0
+                self.get_logger().warn(
+                    f"¡FUERA DE ZONA SEGURA! ({p.x:.2f}, {p.y:.2f}, {p.z:.2f}) "
+                    f"exceso={overshoot:.2f}m — retorno cuadrático activado",
+                    throttle_duration_sec=0.5
+                )
+            target_x = max(min(p.x,  self.limit_xy),   -self.limit_xy)
+            target_y = max(min(p.y,  self.limit_xy),   -self.limit_xy)
+            target_z = max(min(p.z,  self.limit_z_max), self.limit_z_min)
+        else:
+            if self.in_safety_mode:
+                self.in_safety_mode = False
+                self.get_logger().info("Dron de vuelta en zona segura — control normal reanudado")
+            target_x = self.target_x
+            target_y = self.target_y
+            target_z = self.target_z
+
         # 1. Calcular Errores actuales (P)
-        error_x = self.target_x - self.current_pose.x
-        error_y = self.target_y - self.current_pose.y
-        error_z = self.target_z - self.current_pose.z
-        
+        error_x = target_x - self.current_pose.x
+        error_y = target_y - self.current_pose.y
+        error_z = target_z - self.current_pose.z
+
         # Distancia euclidiana al objetivo
         distance = math.sqrt(error_x**2 + error_y**2 + error_z**2)
-        
+
         twist = Twist()
-        
+
         # Tolerancia para detenerse (15 cm para evitar salir y entrar por ruido)
-        if distance > 0.15: 
-            
+        if distance > 0.15:
+
             # 2. Calcular Integrales (I) y aplicar Anti-windup
             self.integral_x += error_x * dt
             self.integral_y += error_y * dt
             self.integral_z += error_z * dt
-            
+
             self.integral_x = max(min(self.integral_x, self.max_integral), -self.max_integral)
             self.integral_y = max(min(self.integral_y, self.max_integral), -self.max_integral)
             self.integral_z = max(min(self.integral_z, self.max_integral), -self.max_integral)
-            
+
             # 3. Calcular Derivadas (D)
             raw_dx = (error_x - self.prev_error_x) / dt
             raw_dy = (error_y - self.prev_error_y) / dt
             raw_dz = (error_z - self.prev_error_z) / dt
-            
+
             # Suavizar derivada (EMA) — alpha bajo para absorber spikes de sensores reales
             alpha_d = 0.05
             self.filtered_dx = (alpha_d * raw_dx) + ((1.0 - alpha_d) * self.filtered_dx)
             self.filtered_dy = (alpha_d * raw_dy) + ((1.0 - alpha_d) * self.filtered_dy)
             self.filtered_dz = (alpha_d * raw_dz) + ((1.0 - alpha_d) * self.filtered_dz)
-            
+
             # 4. Ecuación PID (usando derivadas filtradas - cálculo en el marco global de OptiTrack)
             global_vel_x = (self.kp * error_x) + (self.ki * self.integral_x) + (self.kd * self.filtered_dx)
             global_vel_y = (self.kp * error_y) + (self.ki * self.integral_y) + (self.kd * self.filtered_dy)
             vel_z = (self.kp * error_z) + (self.ki * self.integral_z) + (self.kd * self.filtered_dz)
-            
+
             # --- ROTACIÓN DE MARCOS: DEL GLOBAL AL LOCAL ---
-            # Extraer el ángulo Yaw (Z) del dron a partir del cuaternión de odometría
             q = self.current_orientation
             siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
             cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw = math.atan2(siny_cosp, cosy_cosp)
-            
-            # Rotar el vector de velocidad global para que tenga sentido desde el punto de vista del dron
+
             local_vel_x = global_vel_x * math.cos(yaw) + global_vel_y * math.sin(yaw)
             local_vel_y = -global_vel_x * math.sin(yaw) + global_vel_y * math.cos(yaw)
-            
-            # 5. Aplicar saturación (Clamp de velocidad en el marco local)
-            twist.linear.x = max(min(local_vel_x, self.max_vel), -self.max_vel)
-            twist.linear.y = max(min(local_vel_y, self.max_vel), -self.max_vel)
-            twist.linear.z = max(min(vel_z, self.max_vel), -self.max_vel)
-            
+
+            # 5. Aplicar saturación — límite crece cuadráticamente si está fuera de zona
+            twist.linear.x = max(min(local_vel_x, active_max_vel), -active_max_vel)
+            twist.linear.y = max(min(local_vel_y, active_max_vel), -active_max_vel)
+            twist.linear.z = max(min(vel_z,        active_max_vel), -active_max_vel)
+
         else:
-            # Detener el dron al alcanzar el objetivo, pero NO resetear integrales.
-            # Conservar las integrales permite que el dron siga haciendo fuerza
-            # contra el viento o la deriva aerodinámica.
             twist.linear.x = 0.0
             twist.linear.y = 0.0
             twist.linear.z = 0.0
