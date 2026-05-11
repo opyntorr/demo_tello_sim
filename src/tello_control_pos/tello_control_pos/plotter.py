@@ -108,8 +108,10 @@ class TelloPlotter(Node):
         self.ax_stats = self.fig.add_subplot(gs[2, 2])
         self.ax_stats.axis('off')
         self.ax_stats.set_title('Estadísticas de Ruido', fontsize=9)
-        self.stats_text = self.ax_stats.text(0.05, 0.95, 'Esperando datos...', 
-            transform=self.ax_stats.transAxes, fontsize=8, verticalalignment='top', family='monospace')
+        self.stats_text = self.ax_stats.text(
+            0.05, 0.95, 'Esperando datos...',
+            transform=self.ax_stats.transAxes, fontsize=8,
+            verticalalignment='top', family='monospace')
         
         plt.show()
 
@@ -275,7 +277,7 @@ class TelloPlotter(Node):
                 
                 self.fig.canvas.draw()
                 self.fig.canvas.flush_events()
-            except Exception as e:
+            except Exception:
                 pass
 
     def exportar_datos(self):

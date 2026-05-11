@@ -9,7 +9,7 @@ class DriftSimulator(Node):
         super().__init__('drift_simulator')
         
         # Parámetro para la magnitud del drift
-        self.declare_parameter('drift_magnitude', 0.1) # 10 cm/s por defecto
+        self.declare_parameter('drift_magnitude', 0.1)  # 10 cm/s por defecto
         self.drift_magnitude = self.get_parameter('drift_magnitude').get_parameter_value().double_value
         
         # Generar una dirección aleatoria (ángulo entre 0 y 2*pi)

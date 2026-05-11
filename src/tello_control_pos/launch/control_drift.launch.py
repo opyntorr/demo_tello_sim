@@ -1,11 +1,9 @@
-import os
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction
 
+
 def generate_launch_description():
-    pkg_dir = get_package_share_directory('tello_control_pos')
     return LaunchDescription([
         # 1. Fusionar poses de OptiTrack y Odometría
         Node(
@@ -51,7 +49,7 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 {'use_sim_time': True},
-                {'drift_magnitude': 0.5} # Viento masivo en simulación
+                {'drift_magnitude': 0.5}  # Viento masivo en simulación
             ]
         ),
         

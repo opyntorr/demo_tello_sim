@@ -1,12 +1,10 @@
-import os
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction, RegisterEventHandler
 from launch.event_handlers import OnShutdown
 
+
 def generate_launch_description():
-    pkg_dir = get_package_share_directory('tello_control_pos')
     return LaunchDescription([
         # 1. Driver del Tello Real (Se conecta por WiFi al dron físico)
         Node(

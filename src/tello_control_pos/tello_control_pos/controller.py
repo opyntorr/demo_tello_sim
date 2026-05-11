@@ -41,9 +41,9 @@ class TelloPositionController(Node):
         self.max_integral = 1.0     # Límite de acumulación
 
         # Zona de vuelo segura
-        self.limit_xy    =  2.0
-        self.limit_z_min =  0.4
-        self.limit_z_max =  2.5
+        self.limit_xy = 2.0
+        self.limit_z_min = 0.4
+        self.limit_z_max = 2.5
 
         self.in_safety_mode = False
         
