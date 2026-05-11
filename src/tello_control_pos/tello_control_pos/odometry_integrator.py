@@ -21,6 +21,8 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
+from geometry_msgs.msg import Vector3Stamped
+from std_msgs.msg import Float64
 import numpy as np
 import math
 
@@ -45,7 +47,7 @@ class EKFOdometryNode(Node):
             self.imu_callback, 10
         )
 
-        # ── Publicador ────────────────────────────────────────────────
+        # ── Publicador principal ──────────────────────────────────────
         self.odom_pub = self.create_publisher(
             Odometry, '/drone1/integrated_odom', 10
         )
@@ -59,58 +61,129 @@ class EKFOdometryNode(Node):
         # ── Estado del EKF ────────────────────────────────────────────
         # x = [px, py, pz, vx, vy, vz, θ]
         self.x = np.zeros(7)
-        self.P = np.eye(7) * 0.1            # Covarianza inicial
+        self.P = np.eye(7) * 0.1
 
         # ── Ruido de proceso (Q) ──────────────────────────────────────
         self.Q = np.diag([
-            0.01,   # px  - poca incertidumbre en posición
+            0.01,   # px
             0.01,   # py
             0.01,   # pz
-            0.5,    # vx  - más incertidumbre en velocidad
+            0.5,    # vx
             0.5,    # vy
             0.5,    # vz
             0.01    # θ
         ])
 
         # ── Ruido de medición (R) por sensor ──────────────────────────
-        self.R_vel = np.diag([0.3, 0.3, 0.3])    # Flujo óptico (ruidoso)
-        self.R_tof = np.array([[0.05]])            # TOF (bastante preciso)
-        self.R_yaw = np.array([[0.1]])             # IMU yaw
+        self.R_vel = np.diag([0.3, 0.3, 0.3])
+        self.R_tof = np.array([[0.05]])
+        self.R_yaw = np.array([[0.1]])
 
         # ── Matrices de observación (H) ───────────────────────────────
-        # Velocidad: observamos [vx, vy, vz] del estado
         self.H_vel = np.zeros((3, 7))
-        self.H_vel[0, 3] = 1.0  # vx
-        self.H_vel[1, 4] = 1.0  # vy
-        self.H_vel[2, 5] = 1.0  # vz
+        self.H_vel[0, 3] = 1.0
+        self.H_vel[1, 4] = 1.0
+        self.H_vel[2, 5] = 1.0
 
-        # TOF: observamos pz del estado
         self.H_tof = np.zeros((1, 7))
-        self.H_tof[0, 2] = 1.0  # pz
+        self.H_tof[0, 2] = 1.0
 
-        # Yaw IMU: observamos θ del estado
         self.H_yaw = np.zeros((1, 7))
-        self.H_yaw[0, 6] = 1.0  # θ
+        self.H_yaw[0, 6] = 1.0
 
         # ── Variables auxiliares ───────────────────────────────────────
-        self.omega_z = 0.0                   # Velocidad angular actual
+        self.omega_z = 0.0
         self.last_time = self.get_clock().now()
-        self.imu_yaw = None                  # Último yaw del IMU
+        self.imu_yaw = None
 
         # ── Control de TOF: solo durante takeoff ──────────────────────
-        self.takeoff_complete = False         # Se activa al alcanzar altura
-        self.declare_parameter('takeoff_height', 0.5)  # Umbral en metros
+        self.takeoff_complete = False
+        self.declare_parameter('takeoff_height', 0.5)
         self.takeoff_height = self.get_parameter(
             'takeoff_height'
         ).get_parameter_value().double_value
+
+        # ── Publicadores de diagnóstico (PlotJuggler) ─────────────────
+        # Estado EKF
+        self._dbg_pose_pub    = self.create_publisher(Vector3Stamped, '/debug/ekf/pose',     10)
+        self._dbg_vel_pub     = self.create_publisher(Vector3Stamped, '/debug/ekf/velocity', 10)
+        self._dbg_yaw_pub     = self.create_publisher(Float64,        '/debug/ekf/yaw',      10)
+        # Incertidumbre del filtro (diagonal de P)
+        self._dbg_cov_pos_pub = self.create_publisher(Vector3Stamped, '/debug/ekf/cov_pos',  10)
+        self._dbg_cov_vel_pub = self.create_publisher(Vector3Stamped, '/debug/ekf/cov_vel',  10)
+        # Señales de los sensores de entrada
+        self._dbg_odom_vel_pub  = self.create_publisher(Vector3Stamped, '/debug/ekf/odom_vel_raw', 10)
+        self._dbg_tof_pub       = self.create_publisher(Float64,        '/debug/ekf/tof_z',        10)
+        self._dbg_tof_valid_pub = self.create_publisher(Float64,        '/debug/ekf/tof_valid',    10)
+        self._dbg_takeoff_pub   = self.create_publisher(Float64,        '/debug/ekf/takeoff_done', 10)
+
+        # ── Watchdog ──────────────────────────────────────────────────
+        self._last_odom_time = 0.0
+        self._last_imu_time  = 0.0
+        self.watchdog_timer = self.create_timer(1.0, self._watchdog)
 
         # ── Bucle de predicción a 50 Hz ───────────────────────────────
         self.timer = self.create_timer(0.02, self.predict_loop)
 
         self.get_logger().info(
-            f"EKF Odometry iniciado (vel_multiplier={self.multiplier}, "
-            f"takeoff_height={self.takeoff_height}m)"
+            f'[ekf] Nodo iniciado | vel_multiplier={self.multiplier}'
+            f' takeoff_height={self.takeoff_height} m'
         )
+
+    # ──────────────────────────────────────────────────────────────────
+    # DIAGNÓSTICO
+    # ──────────────────────────────────────────────────────────────────
+
+    def _pub_v3(self, pub, x, y, z, stamp):
+        """Publish a Vector3Stamped with a shared stamp."""
+        msg = Vector3Stamped()
+        msg.header.stamp = stamp
+        msg.vector.x = float(x)
+        msg.vector.y = float(y)
+        msg.vector.z = float(z)
+        pub.publish(msg)
+
+    def _publish_debug(self, stamp):
+        """
+        Publish all EKF diagnostic topics.
+
+        Llamado en cada paso de predicción (50 Hz) para que PlotJuggler
+        reciba datos continuos independientemente de la tasa de los sensores.
+        """
+        now_stamp = stamp.to_msg()
+
+        # Estado estimado
+        self._pub_v3(self._dbg_pose_pub, self.x[0], self.x[1], self.x[2], now_stamp)
+        self._pub_v3(self._dbg_vel_pub,  self.x[3], self.x[4], self.x[5], now_stamp)
+
+        yaw_msg = Float64()
+        yaw_msg.data = float(self.x[6])
+        self._dbg_yaw_pub.publish(yaw_msg)
+
+        # Incertidumbre (diagonal de la covarianza)
+        self._pub_v3(self._dbg_cov_pos_pub,
+                     self.P[0, 0], self.P[1, 1], self.P[2, 2], now_stamp)
+        self._pub_v3(self._dbg_cov_vel_pub,
+                     self.P[3, 3], self.P[4, 4], self.P[5, 5], now_stamp)
+
+        # Estado de despegue
+        tkoff_msg = Float64()
+        tkoff_msg.data = 1.0 if self.takeoff_complete else 0.0
+        self._dbg_takeoff_pub.publish(tkoff_msg)
+
+    def _watchdog(self):
+        """Advierte cuando algún sensor lleva demasiado tiempo sin publicar."""
+        now = self.get_clock().now().nanoseconds / 1e9
+        if self._last_odom_time > 0.0 and now - self._last_odom_time > 0.5:
+            self.get_logger().warn(
+                f'[ekf] ADVERTENCIA: sin datos de /drone1/odom'
+                f' en {now - self._last_odom_time:.2f} s'
+            )
+        if self._last_imu_time > 0.0 and now - self._last_imu_time > 0.5:
+            self.get_logger().warn(
+                f'[ekf] ADVERTENCIA: sin datos de /drone1/imu'
+                f' en {now - self._last_imu_time:.2f} s'
+            )
 
     # ──────────────────────────────────────────────────────────────────
     # CALLBACKS
@@ -118,12 +191,13 @@ class EKFOdometryNode(Node):
 
     def odom_callback(self, msg):
         """Recibe velocidades del flujo óptico y altura del TOF."""
+        self._last_odom_time = self.get_clock().now().nanoseconds / 1e9
+
         # 1. Leer velocidades en body frame y aplicar multiplicador
         vx_body = msg.twist.twist.linear.x * self.multiplier
         vy_body = msg.twist.twist.linear.y * self.multiplier
         vz      = msg.twist.twist.linear.z * self.multiplier
 
-        # Guardamos omega_z para la predicción
         self.omega_z = msg.twist.twist.angular.z
 
         # 2. Rotar velocidad de body → world usando el θ estimado
@@ -139,22 +213,42 @@ class EKFOdometryNode(Node):
 
         # 4. Corrección EKF con medición de TOF (solo durante takeoff)
         incoming_z = msg.pose.pose.position.z
-        if not self.takeoff_complete:
-            if 0.01 < incoming_z < 5.0:
-                z_tof = np.array([incoming_z])
-                self._ekf_update(z_tof, self.H_tof, self.R_tof)
+        tof_valid = 0.01 < incoming_z < 5.0
 
-                # Verificar si el takeoff se completó
-                if incoming_z >= self.takeoff_height:
-                    self.takeoff_complete = True
-                    self.get_logger().info(
-                        f"Takeoff completado (TOF={incoming_z:.2f}m). "
-                        f"Cambiando a odometría pura para Z."
-                    )
+        if not self.takeoff_complete and tof_valid:
+            z_tof = np.array([incoming_z])
+            self._ekf_update(z_tof, self.H_tof, self.R_tof)
+
+            if incoming_z >= self.takeoff_height:
+                self.takeoff_complete = True
+                self.get_logger().info(
+                    f'[ekf] Takeoff completado (TOF={incoming_z:.2f} m).'
+                    f' Cambiando a odometría pura para Z.'
+                )
+
+        # Diagnóstico de sensores de entrada
+        now_stamp = self.get_clock().now().to_msg()
+
+        self._pub_v3(self._dbg_odom_vel_pub, vx_body, vy_body, vz, now_stamp)
+
+        tof_msg = Float64()
+        tof_msg.data = float(incoming_z)
+        self._dbg_tof_pub.publish(tof_msg)
+
+        valid_msg = Float64()
+        valid_msg.data = 1.0 if tof_valid else 0.0
+        self._dbg_tof_valid_pub.publish(valid_msg)
+
+        self.get_logger().info(
+            f'[ekf] odom: vel_body=({vx_body:.3f},{vy_body:.3f},{vz:.3f})'
+            f' tof_z={incoming_z:.3f} [{"VÁLIDO" if tof_valid else "INVÁLIDO"}]',
+            throttle_duration_sec=2.0,
+        )
 
     def imu_callback(self, msg):
         """Recibe la orientación del IMU para corregir el yaw."""
-        # Extraer yaw del quaternion
+        self._last_imu_time = self.get_clock().now().nanoseconds / 1e9
+
         q = [
             msg.orientation.x,
             msg.orientation.y,
@@ -163,9 +257,13 @@ class EKFOdometryNode(Node):
         ]
         _, _, yaw = tf_transformations.euler_from_quaternion(q)
 
-        # Corrección EKF con medición de yaw
         z_yaw = np.array([yaw])
         self._ekf_update(z_yaw, self.H_yaw, self.R_yaw)
+
+        self.get_logger().info(
+            f'[ekf] imu: yaw={yaw:.3f} rad  yaw_estimado={self.x[6]:.3f} rad',
+            throttle_duration_sec=2.0,
+        )
 
     # ──────────────────────────────────────────────────────────────────
     # EKF: PREDICCIÓN
@@ -179,28 +277,39 @@ class EKFOdometryNode(Node):
         if dt <= 0.0:
             return
 
+        if dt > 1.0:
+            self.get_logger().warn(f'[ekf] ADVERTENCIA: dt anómalo ({dt:.4f} s)')
+
         # 1. Modelo de predicción f(x, u)
         px, py, pz, vx, vy, vz, theta = self.x
 
-        self.x[0] = px + vx * dt       # px
-        self.x[1] = py + vy * dt       # py
-        self.x[2] = pz + vz * dt       # pz
-        # vx, vy, vz se mantienen (modelo de velocidad constante)
-        self.x[6] = theta + self.omega_z * dt  # θ
+        self.x[0] = px + vx * dt
+        self.x[1] = py + vy * dt
+        self.x[2] = pz + vz * dt
+        self.x[6] = theta + self.omega_z * dt
 
-        # 2. Jacobiano F (derivada parcial de f respecto a x)
+        # 2. Jacobiano F
         F = np.eye(7)
-        F[0, 3] = dt   # ∂px/∂vx
-        F[1, 4] = dt   # ∂py/∂vy
-        F[2, 5] = dt   # ∂pz/∂vz
+        F[0, 3] = dt
+        F[1, 4] = dt
+        F[2, 5] = dt
 
         # 3. Propagar covarianza: P = F * P * Fᵀ + Q
         self.P = F @ self.P @ F.T + self.Q * dt
 
-        # 4. Publicar la odometría estimada
+        # 4. Publicar odometría estimada + diagnósticos
         self._publish_odom(current_time)
+        self._publish_debug(current_time)
 
         self.last_time = current_time
+
+        self.get_logger().info(
+            f'[ekf] estado: pos=({self.x[0]:.3f},{self.x[1]:.3f},{self.x[2]:.3f})'
+            f' vel=({self.x[3]:.3f},{self.x[4]:.3f},{self.x[5]:.3f})'
+            f' θ={self.x[6]:.3f} rad'
+            f' | cov_pos=({self.P[0,0]:.4f},{self.P[1,1]:.4f},{self.P[2,2]:.4f})',
+            throttle_duration_sec=2.0,
+        )
 
     # ──────────────────────────────────────────────────────────────────
     # EKF: CORRECCIÓN (UPDATE)
@@ -208,19 +317,10 @@ class EKFOdometryNode(Node):
 
     def _ekf_update(self, z, H, R):
         """Ejecuta el paso de corrección genérico del EKF."""
-        # 1. Innovación: y = z - H * x
         y = z - H @ self.x
-
-        # 2. Covarianza de innovación: S = H * P * Hᵀ + R
         S = H @ self.P @ H.T + R
-
-        # 3. Ganancia de Kalman: K = P * Hᵀ * S⁻¹
         K = self.P @ H.T @ np.linalg.inv(S)
-
-        # 4. Actualizar estado: x = x + K * y
         self.x = self.x + K @ y
-
-        # 5. Actualizar covarianza: P = (I - K * H) * P
         I = np.eye(7)
         self.P = (I - K @ H) @ self.P
 
@@ -235,19 +335,16 @@ class EKFOdometryNode(Node):
         odom_msg.header.frame_id = "odom"
         odom_msg.child_frame_id = "base_link"
 
-        # Posición estimada
         odom_msg.pose.pose.position.x = self.x[0]
         odom_msg.pose.pose.position.y = self.x[1]
         odom_msg.pose.pose.position.z = self.x[2]
 
-        # Orientación (θ → quaternion)
         q = tf_transformations.quaternion_from_euler(0, 0, self.x[6])
         odom_msg.pose.pose.orientation.x = q[0]
         odom_msg.pose.pose.orientation.y = q[1]
         odom_msg.pose.pose.orientation.z = q[2]
         odom_msg.pose.pose.orientation.w = q[3]
 
-        # Velocidades estimadas (en world frame)
         odom_msg.twist.twist.linear.x = self.x[3]
         odom_msg.twist.twist.linear.y = self.x[4]
         odom_msg.twist.twist.linear.z = self.x[5]
