@@ -2,17 +2,22 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, Point
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Empty
 import math
 from rclpy.signals import SignalHandlerOptions
 
 class TelloPositionController(Node):
     def __init__(self):
         super().__init__('tello_position_controller')
-        
+
         # Publicadores y Suscriptores
         self.cmd_vel_pub = self.create_publisher(Twist, '/drone1/cmd_vel', 10)
         self.odom_sub = self.create_subscription(Odometry, '/odometry/filtered', self.odom_callback, 10)
         self.target_sub = self.create_subscription(Point, '/drone1/target_position', self.target_callback, 10)
+        self.land_sub = self.create_subscription(Empty, '/land', self._safety_stop, 1)
+        self.emergency_sub = self.create_subscription(Empty, '/emergency', self._safety_stop, 1)
+
+        self.active = True
         
         # Posición objetivo inicializada en None (esperando comando)
         self.target_x = None
@@ -38,6 +43,17 @@ class TelloPositionController(Node):
         self.declare_parameter('velocity_scale', 1.0)
         self.vel_scale = self.get_parameter('velocity_scale').get_parameter_value().double_value
         
+        # --- NUEVOS PARÁMETROS DE SEGURIDAD ---
+        self.declare_parameter('max_altitude', 3.0)     # Altura máxima permitida
+        self.declare_parameter('min_altitude', 0.2)     # Altura mínima para considerar vuelo
+        self.declare_parameter('max_xy_radius', 4.0)    # Radio máximo desde el origen (0,0)
+        self.declare_parameter('odom_timeout', 0.5)     # Tiempo máximo sin odometría (segundos)
+        
+        self.max_alt = self.get_parameter('max_altitude').get_parameter_value().double_value
+        self.min_alt = self.get_parameter('min_altitude').get_parameter_value().double_value
+        self.max_xy = self.get_parameter('max_xy_radius').get_parameter_value().double_value
+        self.odom_timeout = self.get_parameter('odom_timeout').get_parameter_value().double_value
+        
 
         
         # Memoria de estado para derivadas e integrales
@@ -55,15 +71,23 @@ class TelloPositionController(Node):
         self.filtered_dz = 0.0
         
         self.current_pose = None
+        self.current_orientation = None
         self.last_time = None
+        self.last_odom_time = self.get_clock().now()
         self.start_time = None
         
         # Bucle de control a 100 Hz (sincronizado con OptiTrack a 120 Hz)
         self.timer = self.create_timer(1.0/100.0, self.control_loop)
         
+    def _safety_stop(self, msg):
+        self.active = False
+        self.cmd_vel_pub.publish(Twist())
+        self.get_logger().warn("Land/Emergency recibido — controlador silenciado")
+
     def odom_callback(self, msg):
         self.current_pose = msg.pose.pose.position
         self.current_orientation = msg.pose.pose.orientation
+        self.last_odom_time = self.get_clock().now()
         
         
     def target_callback(self, msg):
@@ -74,10 +98,38 @@ class TelloPositionController(Node):
         self.get_logger().info(f"Nuevo objetivo recibido: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
         
     def control_loop(self):
+        if not self.active:
+            return
+
+        current_time = self.get_clock().now()
+        
+        # 1. SEGURIDAD: Verificar Watchdog de Odometría (Pérdida de localización)
+        dt_odom = (current_time - self.last_odom_time).nanoseconds / 1e9
+        if dt_odom > self.odom_timeout:
+            self.get_logger().error(f"¡LOCALIZACIÓN PERDIDA! Hace {dt_odom:.2f}s. Deteniendo motores.", throttle_duration_sec=1.0)
+            self.cmd_vel_pub.publish(Twist())
+            return
+
         if self.current_pose is None:
             return
             
-        current_time = self.get_clock().now()
+        # 2. SEGURIDAD: Geofencing (Límites de espacio)
+        # Altura máxima
+        if self.current_pose.z > self.max_alt:
+            self.get_logger().warn(f"¡Límite de altura excedido! ({self.current_pose.z:.2f}m > {self.max_alt}m)", throttle_duration_sec=1.0)
+            # Forzar aterrizaje o comando de descenso agresivo
+            twist = Twist()
+            twist.linear.z = -0.5 * self.vel_scale
+            self.cmd_vel_pub.publish(twist)
+            return
+
+        # Radio XY
+        dist_xy = math.sqrt(self.current_pose.x**2 + self.current_pose.y**2)
+        if dist_xy > self.max_xy:
+            self.get_logger().error(f"¡FUERA DE RANGO XY! ({dist_xy:.2f}m > {self.max_xy}m). Regresando...", throttle_duration_sec=1.0)
+            # Aquí podríamos implementar un "Return to Home", por ahora solo detenemos
+            self.cmd_vel_pub.publish(Twist())
+            return
             
         # Seguridad: Esperar a que el dron termine el despegue físico
         if not self.has_taken_off:
