@@ -2,6 +2,7 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction
 
+
 def generate_launch_description():
     return LaunchDescription([
         # 1. Fusionar poses de OptiTrack y Odometría
@@ -13,7 +14,7 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}]
         ),
         
-        # 2. Ejecutar plotter
+        # 3. Ejecutar plotter
         Node(
             package='tello_control_pos',
             executable='plotter',
@@ -22,22 +23,37 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}]
         ),
         
-        # 3. Ejecutar position_controller (sin drift, comando directo al dron)
+        # 4. Ejecutar position_controller (remapeando salida para inyectar drift)
         Node(
             package='tello_control_pos',
             executable='position_controller',
             name='position_controller',
             output='screen',
+            remappings=[
+                ('/drone1/cmd_vel', '/drone1/cmd_vel_clean')
+            ],
             parameters=[
                 {'use_sim_time': True},
                 {'velocity_scale': 1.0},
-                {'kp': 0.4},
-                {'ki': 0.02},
-                {'kd': 0.4}
+                {'kp': 1.2},
+                {'ki': 0.1},
+                {'kd': 0.5}
             ]
         ),
         
-        # 4. Ejecutar optitrack_simulator (Baja latencia como en drift)
+        # 4.5 Ejecutar simulador de drift
+        Node(
+            package='tello_control_pos',
+            executable='drift_simulator',
+            name='drift_simulator',
+            output='screen',
+            parameters=[
+                {'use_sim_time': True},
+                {'drift_magnitude': 0.5}  # Viento masivo en simulación
+            ]
+        ),
+        
+        # 5. Ejecutar optitrack_simulator
         Node(
             package='tello_control_pos',
             executable='optitrack_simulator',
@@ -49,7 +65,7 @@ def generate_launch_description():
             ]
         ),
         
-        # 5. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
+        # 6. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
         TimerAction(
             period=3.0,
             actions=[

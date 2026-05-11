@@ -2,18 +2,10 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction
 
+
 def generate_launch_description():
     return LaunchDescription([
-        # 1. Fusionar poses de OptiTrack y Odometría
-        Node(
-            package='tello_control_pos',
-            executable='pose_fuser',
-            name='pose_fuser',
-            output='screen',
-            parameters=[{'use_sim_time': True}]
-        ),
-        
-        # 2. Ejecutar plotter
+        # 1. Ejecutar plotter
         Node(
             package='tello_control_pos',
             executable='plotter',
@@ -22,34 +14,24 @@ def generate_launch_description():
             parameters=[{'use_sim_time': True}]
         ),
         
-        # 3. Ejecutar position_controller (sin drift, comando directo al dron)
+        # 2. Ejecutar position_controller usando solo odometría
         Node(
             package='tello_control_pos',
             executable='position_controller',
             name='position_controller',
             output='screen',
+            remappings=[
+                ('/odometry/filtered', '/drone1/odom')  # Remapear para que use odometría pura
+            ],
             parameters=[
                 {'use_sim_time': True},
                 {'velocity_scale': 1.0},
-                {'kp': 0.4},
-                {'ki': 0.02},
-                {'kd': 0.4}
+                {'kp': 0.4},       # PID más suave para Gazebo
+                {'kd': 0.15}       # PID más suave para Gazebo
             ]
         ),
         
-        # 4. Ejecutar optitrack_simulator (Baja latencia como en drift)
-        Node(
-            package='tello_control_pos',
-            executable='optitrack_simulator',
-            name='optitrack_simulator',
-            output='screen',
-            parameters=[
-                {'use_sim_time': True},
-                {'latency_sec': 0.005}
-            ]
-        ),
-        
-        # 5. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
+        # 3. Enviar comando de takeoff con 3 segundos de retraso
         TimerAction(
             period=3.0,
             actions=[

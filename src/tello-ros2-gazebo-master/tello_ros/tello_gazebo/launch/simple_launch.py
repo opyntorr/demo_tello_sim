@@ -1,41 +1,53 @@
-"""Simulate a Tello drone"""
-
 import os
-
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch.actions import ExecuteProcess
-
 
 def generate_launch_description():
-    ns = 'drone1'
-    world_path = os.path.join(get_package_share_directory('tello_gazebo'), 'worlds', 'simple.world')
-    urdf_path = os.path.join(get_package_share_directory('tello_description'), 'urdf', 'tello_1.urdf')
+    tello_gazebo_dir = get_package_share_directory('tello_gazebo')
+    ros_ign_gazebo_dir = get_package_share_directory('ros_ign_gazebo')
+
+    world_sdf = os.path.join(tello_gazebo_dir, 'worlds', 'simple.sdf')
+    tello_sdf = os.path.join(tello_gazebo_dir, 'models', 'tello', 'model.sdf')
+    bridge_config = os.path.join(tello_gazebo_dir, 'config', 'bridge.yaml')
 
     return LaunchDescription([
-        # Launch Gazebo, loading tello.world
-        ExecuteProcess(cmd=[
-            'gazebo',
-            '--verbose',
-            '-s', 'libgazebo_ros_init.so',  # Publish /clock
-            '-s', 'libgazebo_ros_factory.so',  # Provide gazebo_ros::Node
-            world_path
-        ], output='screen'),
+        # 1. Launch Gazebo Sim (Ignition)
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(ros_ign_gazebo_dir, 'launch', 'ign_gazebo.launch.py')
+            ),
+            launch_arguments={'ign_args': f'-r {world_sdf}'}.items()
+        ),
 
-        # Spawn tello.urdf
-        Node(package='tello_gazebo', executable='inject_entity.py', output='screen',
-             arguments=[urdf_path, '0', '0', '1', '0']),
+        # 2. Spawn Tello
+        Node(
+            package='ros_ign_gazebo',
+            executable='create',
+            arguments=[
+                '-name', 'drone1',
+                '-file', tello_sdf,
+                '-x', '0', '-y', '0', '-z', '1'
+            ],
+            output='screen'
+        ),
 
-        # Publish static transforms
-        Node(package='robot_state_publisher', executable='robot_state_publisher', output='screen',
-             arguments=[urdf_path]),
+        # 3. ROS Ign Bridge (CLI args: [ = IGN->ROS, ] = ROS->IGN)
+        Node(
+            package='ros_ign_bridge',
+            executable='parameter_bridge',
+            arguments=[
+                '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock',
+                '/drone1/cmd_vel@geometry_msgs/msg/Twist]ignition.msgs.Twist',
+                '/drone1/camera@sensor_msgs/msg/Image[ignition.msgs.Image',
+            ],
+            output='screen'
+        ),
 
-        # Joystick driver, generates /namespace/joy messages
-        Node(package='joy', executable='joy_node', output='screen',
-             namespace=ns),
-
-        # Joystick controller, generates /namespace/cmd_vel messages
-        Node(package='tello_driver', executable='tello_joy_main', output='screen',
-             namespace=ns),
+        # 4. Robot State Publisher (Optional but good for RViz)
+        # Since we are using SDF, we might need a URDF for state publisher if needed,
+        # but for now let's stick to the basics.
     ])
