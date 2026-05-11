@@ -19,18 +19,20 @@ class TelloPositionController(Node):
         self.target_y = None
         self.target_z = None
         self.target_received = False
+        self.has_taken_off = False
+        self.takeoff_complete_time = None
         
         # Ganancias del controlador PID (Configurables)
-        self.declare_parameter('kp', 0.8)
-        self.declare_parameter('ki', 0.04)
-        self.declare_parameter('kd', 0.35)
+        self.declare_parameter('kp', 2.5)
+        self.declare_parameter('ki', 0.8)
+        self.declare_parameter('kd', 0.0)
         self.kp = self.get_parameter('kp').get_parameter_value().double_value
         self.ki = self.get_parameter('ki').get_parameter_value().double_value
         self.kd = self.get_parameter('kd').get_parameter_value().double_value
         
         # Límites de saturación
-        self.max_vel = 0.25          # Velocidad máxima estricta (50 cm/s)
-        self.max_integral = 2.0     # Límite de acumulación
+        self.max_vel = 0.6          # Velocidad máxima estricta (50 cm/s)
+        self.max_integral = 1.0     # Límite de acumulación
         
         # Escala de velocidad (1.0 para Gazebo, 100.0 para Tello real)
         self.declare_parameter('velocity_scale', 1.0)
@@ -47,17 +49,21 @@ class TelloPositionController(Node):
         self.integral_y = 0.0
         self.integral_z = 0.0
         
-
+        # Filtro para la derivada (EMA)
+        self.filtered_dx = 0.0
+        self.filtered_dy = 0.0
+        self.filtered_dz = 0.0
         
         self.current_pose = None
         self.last_time = None
         self.start_time = None
         
-        # Bucle de control a 10 Hz
-        self.timer = self.create_timer(0.1, self.control_loop)
+        # Bucle de control a 100 Hz (sincronizado con OptiTrack a 120 Hz)
+        self.timer = self.create_timer(1.0/100.0, self.control_loop)
         
     def odom_callback(self, msg):
         self.current_pose = msg.pose.pose.position
+        self.current_orientation = msg.pose.pose.orientation
         
         
     def target_callback(self, msg):
@@ -68,24 +74,44 @@ class TelloPositionController(Node):
         self.get_logger().info(f"Nuevo objetivo recibido: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
         
     def control_loop(self):
-        if self.current_pose is None or not self.target_received:
-            return
-            
-        # Seguridad: Esperar a que el dron termine el despegue físico (Z > 40 cm)
-        # Esto evita enviar comandos agresivos si el objetivo se manda muy pronto.
-        if self.current_pose.z < 0.4:
-            self.get_logger().info("Esperando a que termine el despegue (Z < 0.4m)...", throttle_duration_sec=2.0)
+        if self.current_pose is None:
             return
             
         current_time = self.get_clock().now()
-        
-        # Inicializar el tiempo en la primera ejecución
-        if self.last_time is None:
-            self.last_time = current_time
-            self.start_time = current_time
+            
+        # Seguridad: Esperar a que el dron termine el despegue físico
+        if not self.has_taken_off:
+            if self.current_pose.z < 0.8:
+                self.get_logger().info("Esperando a que termine el despegue (Z < 0.8m)...", throttle_duration_sec=2.0)
+                self.cmd_vel_pub.publish(Twist()) # Enviar comandos 0 para que el drift actúe
+                return
+            else:
+                self.has_taken_off = True
+                self.takeoff_complete_time = current_time
+                self.get_logger().info("¡Despegue detectado! Esperando estabilización macro (1.5s).")
+                self.cmd_vel_pub.publish(Twist())
+                return
+                
+        # Fase de estabilización: Permitir que el Tello termine su macro interno
+        dt_since_takeoff = (current_time - self.takeoff_complete_time).nanoseconds / 1e9
+        if dt_since_takeoff < 1.5:
+            self.get_logger().info(f"Estabilizando despegue ({dt_since_takeoff:.1f}/1.5s)...", throttle_duration_sec=0.5)
+            self.cmd_vel_pub.publish(Twist())
             return
             
-        # Calcular delta de tiempo real en segundos
+        # Capturar la posición actual como meta (Hover automático) si aún no hemos recibido un objetivo manual
+        if not self.target_received:
+            self.target_x = self.current_pose.x
+            self.target_y = self.current_pose.y
+            self.target_z = 2.5
+            self.target_received = True
+            self.get_logger().info(f"¡Hover automático activado tras deriva! Anclando a: X={self.target_x:.2f}, Y={self.target_y:.2f}, Z={self.target_z:.2f}")
+            
+        # Inicializar el tiempo en la primera ejecución activa
+        if self.last_time is None:
+            self.last_time = current_time
+            return
+            
         dt = (current_time - self.last_time).nanoseconds / 1e9
         if dt <= 0.0:
             return
@@ -117,14 +143,31 @@ class TelloPositionController(Node):
             raw_dy = (error_y - self.prev_error_y) / dt
             raw_dz = (error_z - self.prev_error_z) / dt
             
-            # 4. Ecuación PID (usando derivadas crudas)
-            vel_x = (self.kp * error_x) + (self.ki * self.integral_x) + (self.kd * raw_dx)
-            vel_y = (self.kp * error_y) + (self.ki * self.integral_y) + (self.kd * raw_dy)
-            vel_z = (self.kp * error_z) + (self.ki * self.integral_z) + (self.kd * raw_dz)
+            # Suavizar derivada (EMA) — alpha bajo para absorber spikes de sensores reales
+            alpha_d = 0.05
+            self.filtered_dx = (alpha_d * raw_dx) + ((1.0 - alpha_d) * self.filtered_dx)
+            self.filtered_dy = (alpha_d * raw_dy) + ((1.0 - alpha_d) * self.filtered_dy)
+            self.filtered_dz = (alpha_d * raw_dz) + ((1.0 - alpha_d) * self.filtered_dz)
             
-            # 5. Aplicar saturación (Clamp de velocidad)
-            twist.linear.x = max(min(vel_x, self.max_vel), -self.max_vel)
-            twist.linear.y = max(min(vel_y, self.max_vel), -self.max_vel)
+            # 4. Ecuación PID (usando derivadas filtradas - cálculo en el marco global de OptiTrack)
+            global_vel_x = (self.kp * error_x) + (self.ki * self.integral_x) + (self.kd * self.filtered_dx)
+            global_vel_y = (self.kp * error_y) + (self.ki * self.integral_y) + (self.kd * self.filtered_dy)
+            vel_z = (self.kp * error_z) + (self.ki * self.integral_z) + (self.kd * self.filtered_dz)
+            
+            # --- ROTACIÓN DE MARCOS: DEL GLOBAL AL LOCAL ---
+            # Extraer el ángulo Yaw (Z) del dron a partir del cuaternión de odometría
+            q = self.current_orientation
+            siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+            cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            yaw = math.atan2(siny_cosp, cosy_cosp)
+            
+            # Rotar el vector de velocidad global para que tenga sentido desde el punto de vista del dron
+            local_vel_x = global_vel_x * math.cos(yaw) + global_vel_y * math.sin(yaw)
+            local_vel_y = -global_vel_x * math.sin(yaw) + global_vel_y * math.cos(yaw)
+            
+            # 5. Aplicar saturación (Clamp de velocidad en el marco local)
+            twist.linear.x = max(min(local_vel_x, self.max_vel), -self.max_vel)
+            twist.linear.y = max(min(local_vel_y, self.max_vel), -self.max_vel)
             twist.linear.z = max(min(vel_z, self.max_vel), -self.max_vel)
             
         else:

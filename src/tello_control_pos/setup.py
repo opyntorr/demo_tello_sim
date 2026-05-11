@@ -29,9 +29,10 @@ setup(
     entry_points={
         'console_scripts': [
             'position_controller = tello_control_pos.controller:main',
-            'odometry_integrator = tello_control_pos.odometry_integrator:main',
+            'pose_fuser = tello_control_pos.pose_fuser:main',
             'plotter = tello_control_pos.plotter:main',
-            'optitrack_simulator = tello_control_pos.optitrack_simulator:main'
+            'optitrack_simulator = tello_control_pos.optitrack_simulator:main',
+            'drift_simulator = tello_control_pos.drift_simulator:main'
         ],
     },
 )

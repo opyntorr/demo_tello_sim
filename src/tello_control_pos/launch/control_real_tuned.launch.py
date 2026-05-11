@@ -1,12 +1,10 @@
 import os
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction, RegisterEventHandler
 from launch.event_handlers import OnShutdown
 
 def generate_launch_description():
-    pkg_dir = get_package_share_directory('tello_control_pos')
     return LaunchDescription([
         # 1. Driver del Tello Real (Se conecta por WiFi al dron físico)
         Node(
@@ -32,15 +30,16 @@ def generate_launch_description():
             parameters=[{'use_sim_time': False}]
         ),
         
-        # 4. Graficador
+        # 3. Graficador
         Node(
             package='tello_control_pos',
             executable='plotter',
             name='plotter',
-            output='screen'
+            output='screen',
+            parameters=[{'use_sim_time': False}]
         ),
         
-        # 5. Controlador de Posición
+        # 4. Controlador de Posición (¡Con las nuevas ganancias perfectas!)
         Node(
             package='tello_control_pos',
             executable='position_controller',
@@ -50,11 +49,15 @@ def generate_launch_description():
                 ('/drone1/cmd_vel', '/control')  # Remapeo al tópico del dron real
             ],
             parameters=[
-                {'velocity_scale': 100.0}
+                {'use_sim_time': False},
+                {'velocity_scale': 100.0},  # Escala para el dron real [-100, 100]
+                {'kp': 1.2},
+                {'ki': 0.1},
+                {'kd': 0.5}                 # Freno aerodinámico (filtro EMA interno a 240Hz)
             ]
         ),
         
-        # 6. Enviar comando de takeoff al dron real (Retrasado para asegurar conexión)
+        # 5. Enviar comando de takeoff al dron real (Retrasado para asegurar conexión)
         TimerAction(
             period=4.0,  # 4 segundos para darle tiempo al nodo tello de conectarse al WiFi
             actions=[
@@ -70,7 +73,7 @@ def generate_launch_description():
             ]
         ),
         
-        # 7. Al cerrar con Ctrl+C, enviar comando de aterrizaje
+        # 6. Al cerrar con Ctrl+C, enviar comando de aterrizaje
         RegisterEventHandler(
             OnShutdown(
                 on_shutdown=[
