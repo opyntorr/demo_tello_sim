@@ -4,8 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Instalar Gazebo (Classic e Ignition), puente de ROS, herramientas de visión, dependencias del Tello y utilidades
 RUN apt-get update && apt-get install -y \
-    ros-humble-ros-gz \
-    ros-humble-gazebo-ros-pkgs \
+    ros-humble-ros-ign-gazebo \
+    ros-humble-ros-ign-bridge \
     ros-humble-vision-msgs \
     ros-humble-robot-localization \
     ros-humble-xacro \
@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar dependencias del Tello driver
-RUN pip3 install "numpy==1.23.5" transformations catkin_pkg rospkg av image djitellopy2 pyyaml
+RUN pip3 install --no-cache-dir "numpy<1.24" transformations catkin_pkg rospkg av image djitellopy2 pyyaml
 
 # Configurar variables de entorno para NVIDIA
 ENV NVIDIA_VISIBLE_DEVICES \

@@ -15,7 +15,7 @@ class TelloPlotter(Node):
         super().__init__('tello_plotter')
         
         # Suscriptor a la odometría y a la meta
-        self.odom_sub = self.create_subscription(Odometry, '/drone1/integrated_odom', self.odom_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/odometry/filtered', self.odom_callback, 10)
         self.target_sub = self.create_subscription(Point, '/drone1/target_position', self.target_callback, 10)
         
         # Posición objetivo inicial
@@ -23,6 +23,13 @@ class TelloPlotter(Node):
         self.target_y = 0.0
         self.target_z = 0.0
         self.target_received = False
+        
+        # Suscriptor al drift
+        self.drift_sub = self.create_subscription(Point, '/drone1/drift_info', self.drift_callback, 10)
+        self.drift_x = 0.0
+        self.drift_y = 0.0
+        self.drift_magnitude = 0.0
+        self.drift_received = False
         
         # Historial de datos
         self.time_history = []
@@ -35,10 +42,13 @@ class TelloPlotter(Node):
         self.start_time = None
         
         # Historial de ruido (jitter = diferencia entre muestras consecutivas)
+        # Preparar datos estadísticos
         self.jitter_x = []
         self.jitter_y = []
         self.jitter_z = []
         self.jitter_time = []
+        
+        self.get_logger().info("Plotter iniciado. Esperando datos...")
         
         # Varianza en ventana deslizante
         self.WINDOW_SIZE = 25  # Ventana de ~2.5s a 10Hz
@@ -47,7 +57,7 @@ class TelloPlotter(Node):
         self.var_z = []
         self.var_time = []
         
-        # ── Configuración de gráfica en tiempo real ──
+        # Configuración de gráfica en tiempo real
         plt.ion()
         self.fig = plt.figure(figsize=(16, 9))
         gs = gridspec.GridSpec(3, 3, figure=self.fig, wspace=0.35, hspace=0.4)
@@ -98,14 +108,22 @@ class TelloPlotter(Node):
         self.ax_stats = self.fig.add_subplot(gs[2, 2])
         self.ax_stats.axis('off')
         self.ax_stats.set_title('Estadísticas de Ruido', fontsize=9)
-        self.stats_text = self.ax_stats.text(0.05, 0.95, 'Esperando datos...', 
-            transform=self.ax_stats.transAxes, fontsize=8, verticalalignment='top', family='monospace')
+        self.stats_text = self.ax_stats.text(
+            0.05, 0.95, 'Esperando datos...',
+            transform=self.ax_stats.transAxes, fontsize=8,
+            verticalalignment='top', family='monospace')
         
         plt.show()
 
         # Timer para actualizar la gráfica (10 Hz)
         self.timer = self.create_timer(0.1, self.update_plot)
         self.messages_received = 0
+
+    def drift_callback(self, msg):
+        self.drift_x = msg.x
+        self.drift_y = msg.y
+        self.drift_magnitude = np.sqrt(msg.x**2 + msg.y**2)
+        self.drift_received = True
 
     def odom_callback(self, msg):
         # Usar el timestamp del mensaje (cuando el integrador lo publicó),
@@ -246,16 +264,27 @@ class TelloPlotter(Node):
                         f"  Z: {snr_z:.1f}\n\n"
                         f"Muestras: {len(self.x_history)}"
                     )
+                    
+                    if self.drift_received:
+                        stats += (
+                            f"\n\nViento Simulado (Drift):\n"
+                            f"  Magnitud: {self.drift_magnitude:.3f} m/s\n"
+                            f"  Dir X: {self.drift_x:.3f} m/s\n"
+                            f"  Dir Y: {self.drift_y:.3f} m/s"
+                        )
+                        
                     self.stats_text.set_text(stats)
                 
                 self.fig.canvas.draw()
                 self.fig.canvas.flush_events()
-            except Exception as e:
+            except Exception:
                 pass
 
     def exportar_datos(self):
         dir_path = "/ros2_ws/src/tello_control_pos/tello_control_pos/"
-        
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+            
         # 1. Guardar CSV fijo
         csv_file = os.path.join(dir_path, "ultimo_reporte_tello.csv")
         with open(csv_file, mode='w') as f:

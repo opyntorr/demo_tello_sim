@@ -17,3 +17,7 @@ camera_calibration/stitching_output/
 camera_calibration/images/
 camera_calibration/calibration_output/
 camera_calibration/__pycache__/
+
+# OptiTrack related
+src/tello-optitrack/
+

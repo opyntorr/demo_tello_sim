@@ -12,10 +12,21 @@ services:
     stdin_open: true
     tty: true
     privileged: true
+    # GPU NVIDIA para renderizado acelerado (Ignition Ogre2)
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       # Pasar la variable de entorno de la pantalla para las GUIs (Gazebo/RViz)
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
     volumes:
       # Mapear la carpeta src local al workspace del contenedor
       - ./src:/ros2_ws/src
