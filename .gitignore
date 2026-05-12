@@ -10,3 +10,7 @@ src/tello_control_pos/tello_control_pos/*.csv
 # Python cache
 __pycache__/
 *.pyc
+
+# OptiTrack related
+src/tello-optitrack/
+
