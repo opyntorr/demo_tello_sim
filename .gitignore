@@ -11,6 +11,13 @@ src/tello_control_pos/tello_control_pos/*.csv
 __pycache__/
 *.pyc
 
+# Camera Calibration & Stitching
+camera_calibration/stitching_input/
+camera_calibration/stitching_output/
+camera_calibration/images/
+camera_calibration/calibration_output/
+camera_calibration/__pycache__/
+
 # OptiTrack related
 src/tello-optitrack/
 
