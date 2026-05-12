@@ -24,10 +24,13 @@ endif ()
 
 # Find packages
 find_package(ament_cmake REQUIRED)
-find_package(gazebo REQUIRED)  # Note uppercase variables in /usr/lib/x86_64-linux-gnu/cmake/gazebo/gazebo-config.cmake
-find_package(gazebo_dev REQUIRED)
-find_package(gazebo_ros REQUIRED)
+find_package(ignition-cmake2 REQUIRED)
+find_package(ignition-plugin1 REQUIRED COMPONENTS register)
+find_package(ignition-gazebo6 REQUIRED)
+find_package(ignition-math6 REQUIRED)
+find_package(ignition-msgs8 REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -36,7 +39,6 @@ find_package(tello_msgs REQUIRED)
 # Local includes
 include_directories(
   include
-  ${gazebo_ros_INCLUDE_DIRS}
   ${geometry_msgs_INCLUDE_DIRS}
   ${std_msgs_INCLUDE_DIRS}
   ${tello_msgs_INCLUDE_DIRS}
@@ -51,11 +53,17 @@ add_library(
   src/tello_plugin.cpp
 )
 
+target_link_libraries(
+  TelloPlugin
+  ignition-plugin1::register
+  ignition-gazebo6::core
+  ignition-math6::ignition-math6
+)
+
 ament_target_dependencies(
   TelloPlugin
-  gazebo_dev
-  gazebo_ros
   geometry_msgs
+  nav_msgs
   rclcpp
   std_msgs
   tello_msgs
@@ -79,10 +87,10 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-## Install Python scripts
+## Install config files
 install(
-  PROGRAMS src/inject_entity.py
-  DESTINATION lib/${PROJECT_NAME}
+  DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
 )
 
 #=============

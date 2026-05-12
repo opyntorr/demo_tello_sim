@@ -1,0 +1,88 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="tello">
+    <link name="base_link">
+      <inertial>
+        <mass>0.1</mass>
+        <inertia>
+          <ixx>0.000290833</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.00054</iyy>
+          <iyz>0</iyz>
+          <izz>0.000290833</izz>
+        </inertia>
+      </inertial>
+
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.18 0.18 0.05</size>
+          </box>
+        </geometry>
+      </collision>
+
+      <!-- Visuals from URDF -->
+      <visual name="body_white">
+        <pose>0 0 0.01 0 0 0</pose>
+        <geometry><box><size>0.07 0.02 0.02</size></box></geometry>
+        <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+      </visual>
+      <visual name="body_gray">
+        <pose>0 0 -0.01 0 0 0</pose>
+        <geometry><box><size>0.07 0.02 0.02</size></box></geometry>
+        <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material>
+      </visual>
+      <visual name="prop_front_left">
+        <pose>0.05 0.05 0 0 0 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>0.01</length></cylinder></geometry>
+        <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material>
+      </visual>
+      <visual name="prop_front_right">
+        <pose>0.05 -0.05 0 0 0 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>0.01</length></cylinder></geometry>
+        <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material>
+      </visual>
+      <visual name="prop_back_left">
+        <pose>-0.05 0.05 0 0 0 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>0.01</length></cylinder></geometry>
+        <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material>
+      </visual>
+      <visual name="prop_back_right">
+        <pose>-0.05 -0.05 0 0 0 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>0.01</length></cylinder></geometry>
+        <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material>
+      </visual>
+
+      <!-- Camera Sensor -->
+      <sensor name="camera" type="camera">
+        <pose>0.035 0 0 0 0 0</pose>
+        <always_on>1</always_on>
+        <update_rate>30</update_rate>
+        <visualize>true</visualize>
+        <topic>drone1/camera</topic>
+        <camera>
+          <horizontal_fov>0.96</horizontal_fov>
+          <image>
+            <width>960</width>
+            <height>720</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>300</far>
+          </clip>
+        </camera>
+      </sensor>
+    </link>
+
+    <!-- Plugins -->
+    <plugin
+      filename="TelloPlugin"
+      name="tello_gazebo::TelloPlugin">
+      <namespace>drone1</namespace>
+      <link_name>base_link</link_name>
+      <center_of_mass>0 0 0</center_of_mass>
+    </plugin>
+  </model>
+</sdf>
