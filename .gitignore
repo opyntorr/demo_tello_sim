@@ -21,3 +21,8 @@ camera_calibration/__pycache__/
 # OptiTrack related
 src/tello-optitrack/
 
+# Editor / AI tool config
+.codex
+src/.codex
+CLAUDE.md
+
