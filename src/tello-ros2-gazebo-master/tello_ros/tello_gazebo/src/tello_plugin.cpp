@@ -100,6 +100,10 @@ namespace tello_gazebo
     double target_z_v_{0};
     double target_yaw_v_{0};
 
+    // Spawn height (set on first spin_10Hz call to compute relative takeoff/land thresholds)
+    double spawn_z_{0.0};
+    bool spawn_z_set_{false};
+
   public:
     TelloPlugin() = default;
     ~TelloPlugin() = default;
@@ -242,7 +246,14 @@ namespace tello_gazebo
                    const ::ignition::gazebo::EntityComponentManager &_ecm)
     {
       double sim_time_sec = std::chrono::duration<double>(_info.simTime).count();
-      if (sim_time_sec < 1.0) return;
+      if (sim_time_sec < 0.1) return;
+
+      auto world_pose_now = ::ignition::gazebo::worldPose(base_link_.Entity(), _ecm);
+      if (!spawn_z_set_) {
+        spawn_z_ = world_pose_now.Pos().Z();
+        spawn_z_set_ = true;
+        RCLCPP_INFO(node_->get_logger(), "Spawn Z recorded: %.3f m", spawn_z_);
+      }
 
       int battery_percent = static_cast<int>((battery_duration_ - sim_time_sec) / battery_duration_ * 100);
       if (battery_percent <= 0) {
@@ -256,7 +267,7 @@ namespace tello_gazebo
       flight_data.bat = battery_percent;
       flight_data_pub_->publish(flight_data);
 
-      auto world_pose = ::ignition::gazebo::worldPose(base_link_.Entity(), _ecm);
+      auto world_pose = world_pose_now;
 
       // Publish ground truth odometry directly on ROS (replaces gazebo_ros_p3d)
       auto lin_vel = base_link_.WorldLinearVelocity(_ecm);
@@ -288,10 +299,10 @@ namespace tello_gazebo
 
       odom_pub_->publish(odom_msg);
 
-      if (flight_state_ == FlightState::taking_off && world_pose.Pos().Z() > TAKEOFF_Z) {
+      if (flight_state_ == FlightState::taking_off && world_pose.Pos().Z() > spawn_z_ + TAKEOFF_Z) {
         transition(FlightState::flying);
         respond_ok();
-      } else if (flight_state_ == FlightState::landing && world_pose.Pos().Z() < LAND_Z) {
+      } else if (flight_state_ == FlightState::landing && world_pose.Pos().Z() < spawn_z_ + LAND_Z) {
         transition(FlightState::landed);
         respond_ok();
       }

@@ -37,7 +37,22 @@ def generate_launch_description():
             ]
         ),
         
-        # 4. Ejecutar optitrack_simulator (Baja latencia como en drift)
+        # 4. Visor cámara inferior (ventana separada)
+        ExecuteProcess(
+            cmd=['ros2', 'run', 'rqt_image_view', 'rqt_image_view', '/drone1/camera_down'],
+            output='screen'
+        ),
+
+        # 5. Publicar camera_info de la cámara inferior
+        Node(
+            package='tello_control_pos',
+            executable='camera_info_publisher',
+            name='camera_info_publisher_down',
+            output='screen',
+            parameters=[{'use_sim_time': True}]
+        ),
+
+        # 6. Ejecutar optitrack_simulator (Baja latencia como en drift)
         Node(
             package='tello_control_pos',
             executable='optitrack_simulator',
@@ -49,7 +64,7 @@ def generate_launch_description():
             ]
         ),
         
-        # 5. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
+        # 7. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
         TimerAction(
             period=3.0,
             actions=[

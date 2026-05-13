@@ -43,6 +43,7 @@ def generate_launch_description():
                 '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock',
                 '/drone1/cmd_vel@geometry_msgs/msg/Twist]ignition.msgs.Twist',
                 '/drone1/camera@sensor_msgs/msg/Image[ignition.msgs.Image',
+                '/drone1/camera_down@sensor_msgs/msg/Image[ignition.msgs.Image',
             ],
             output='screen'
         ),

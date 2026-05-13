@@ -25,6 +25,8 @@ class TelloPositionController(Node):
         self.target_z = None
         self.target_received = False
         self.has_taken_off = False
+        self.settle_ticks = 0          # ticks consecutivos con z > 0.8 antes de anclar
+        self.SETTLE_REQUIRED = 50      # 0.5 s a 100 Hz
         
         # Ganancias del controlador PID (Configurables)
         self.declare_parameter('kp', 2.5)
@@ -191,7 +193,7 @@ class TelloPositionController(Node):
             raw_dz = (error_z - self.prev_error_z) / dt
 
             # Suavizar derivada (EMA) — alpha bajo para absorber spikes de sensores reales
-            alpha_d = 0.05
+            alpha_d = 0.2
             self.filtered_dx = (alpha_d * raw_dx) + ((1.0 - alpha_d) * self.filtered_dx)
             self.filtered_dy = (alpha_d * raw_dy) + ((1.0 - alpha_d) * self.filtered_dy)
             self.filtered_dz = (alpha_d * raw_dz) + ((1.0 - alpha_d) * self.filtered_dz)

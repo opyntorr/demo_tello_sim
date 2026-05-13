@@ -32,7 +32,9 @@ setup(
             'pose_fuser = tello_control_pos.pose_fuser:main',
             'plotter = tello_control_pos.plotter:main',
             'optitrack_simulator = tello_control_pos.optitrack_simulator:main',
-            'drift_simulator = tello_control_pos.drift_simulator:main'
+            'drift_simulator = tello_control_pos.drift_simulator:main',
+            'tello_joy_teleop = tello_control_pos.tello_joy_teleop:main',
+            'camera_info_publisher = tello_control_pos.camera_info_publisher:main'
         ],
     },
 )

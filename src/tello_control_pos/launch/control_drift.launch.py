@@ -35,9 +35,9 @@ def generate_launch_description():
             parameters=[
                 {'use_sim_time': True},
                 {'velocity_scale': 1.0},
-                {'kp': 1.2},
-                {'ki': 0.1},
-                {'kd': 0.5}
+                {'kp': 0.5},
+                {'ki': 0.06},
+                {'kd': 0.35}
             ]
         ),
         
@@ -49,11 +49,26 @@ def generate_launch_description():
             output='screen',
             parameters=[
                 {'use_sim_time': True},
-                {'drift_magnitude': 0.5}  # Viento masivo en simulación
+                {'drift_magnitude': 0.05}  # Viento masivo en simulación
             ]
         ),
         
-        # 5. Ejecutar optitrack_simulator
+        # 5. Visor cámara inferior (ventana separada)
+        ExecuteProcess(
+            cmd=['ros2', 'run', 'rqt_image_view', 'rqt_image_view', '/drone1/camera_down'],
+            output='screen'
+        ),
+
+        # 7. Publicar camera_info de la cámara inferior sincronizado con las imágenes
+        Node(
+            package='tello_control_pos',
+            executable='camera_info_publisher',
+            name='camera_info_publisher_down',
+            output='screen',
+            parameters=[{'use_sim_time': True}]
+        ),
+
+        # 8. Ejecutar optitrack_simulator
         Node(
             package='tello_control_pos',
             executable='optitrack_simulator',
@@ -65,7 +80,7 @@ def generate_launch_description():
             ]
         ),
         
-        # 6. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
+        # 9. Enviar comando de takeoff con 3 segundos de retraso para asegurar que la simulación esté lista
         TimerAction(
             period=3.0,
             actions=[

@@ -31,7 +31,22 @@ def generate_launch_description():
             ]
         ),
         
-        # 3. Enviar comando de takeoff con 3 segundos de retraso
+        # 3. Visor cámara inferior (ventana separada)
+        ExecuteProcess(
+            cmd=['ros2', 'run', 'rqt_image_view', 'rqt_image_view', '/drone1/camera_down'],
+            output='screen'
+        ),
+
+        # 4. Publicar camera_info de la cámara inferior
+        Node(
+            package='tello_control_pos',
+            executable='camera_info_publisher',
+            name='camera_info_publisher_down',
+            output='screen',
+            parameters=[{'use_sim_time': True}]
+        ),
+
+        # 5. Enviar comando de takeoff con 3 segundos de retraso
         TimerAction(
             period=3.0,
             actions=[
