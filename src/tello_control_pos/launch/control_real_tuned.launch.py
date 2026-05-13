@@ -24,7 +24,7 @@ def generate_launch_description():
             output='screen',
             remappings=[
                 ('/drone1/odom', '/odom'),      # Remapeo al tópico del dron real
-                ('/drone_pose', '/drone/pose')   # Remapeo al tópico del OptiTrack real
+                ('/drone_pose', '/optitrack/rigid_body')   # Remapeo al tópico del OptiTrack real
             ],
             parameters=[{'use_sim_time': False}]
         ),
@@ -50,9 +50,9 @@ def generate_launch_description():
             parameters=[
                 {'use_sim_time': False},
                 {'velocity_scale': 100.0},  # Escala para el dron real [-100, 100]
-                {'kp': 1.2},
-                {'ki': 0.1},
-                {'kd': 0.5}                 # Freno aerodinámico (filtro EMA interno a 240Hz)
+                {'kp': 0.5},
+                {'ki': 0.06},
+                {'kd': 0.35}                 # Freno aerodinámico (filtro EMA interno a 240Hz)
             ]
         ),
         

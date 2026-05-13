@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
+
+_SENSOR_QOS = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=10,
+)
 
 class PoseFuser(Node):
     def __init__(self):
         super().__init__('pose_fuser')
-        
+
         # Suscriptores
         self.opti_sub = self.create_subscription(
             PoseStamped,
             '/drone_pose',
             self.opti_callback,
-            10
+            _SENSOR_QOS,
         )
         
         self.odom_sub = self.create_subscription(
