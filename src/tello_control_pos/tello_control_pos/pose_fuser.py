@@ -35,7 +35,18 @@ class PoseFuser(Node):
         self.last_opti_time = None
         self.optitrack_timeout = 0.5  # segundos sin datos antes de activar fallback
 
+        self._last_odom_time = 0.0
+        self.watchdog_timer = self.create_timer(1.0, self._watchdog)
+
         self.get_logger().info("PoseFuser iniciado: Fusionando posición de OptiTrack con orientación de Odometría")
+
+    def _watchdog(self):
+        """Warn when a sensor has not published for too long."""
+        now = self.get_clock().now().nanoseconds / 1e9
+        if self._last_odom_time > 0.0 and now - self._last_odom_time > 0.5:
+            self.get_logger().warn(
+                f"[fuser] ADVERTENCIA: sin datos de /drone1/odom en {now - self._last_odom_time:.2f} s"
+            )
 
     def opti_callback(self, msg):
         if self.latest_opti_pose is None:
@@ -44,6 +55,7 @@ class PoseFuser(Node):
         self.last_opti_time = self.get_clock().now()
 
     def odom_callback(self, msg):
+        self._last_odom_time = self.get_clock().now().nanoseconds / 1e9
         self.get_logger().info("Dato de odometría del Tello recibido", throttle_duration_sec=2.0)
 
         now = self.get_clock().now()
